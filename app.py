@@ -23,6 +23,8 @@ from PIL import Image, ImageTk
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
+__version__      = "1.0.0"
+
 BASE_URL         = "https://sksg.jaamo.nl"
 LOGIN_URL        = f"{BASE_URL}/login/ouder/sksg"
 ACCOUNTS_URL     = f"{BASE_URL}/ouders/accounts"
@@ -251,7 +253,7 @@ class JaamoApp:
 
     def __init__(self, root):
         self.root = root
-        self.root.title("Jaamo Photo Downloader")
+        self.root.title(f"Jaamo Photo Downloader v{__version__}")
         self.root.minsize(750, 520)
         self.root.configure(bg=BG)
         _apply_styles()
