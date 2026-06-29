@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Jaamo Photo Downloader</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #F0F4F8;
+      --card:     #FFFFFF;
+      --primary:  #2B6CB0;
+      --primary2: #2C5282;
+      --muted:    #718096;
+      --border:   #CBD5E0;
+      --text:     #1A202C;
+      --date-bg:  #EBF4FF;
+      --warn:     #B7791F;
+      --radius:   10px;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+
+    /* ── Hero ───────────────────────────────────────────────── */
+    .hero {
+      background: var(--primary);
+      color: #fff;
+      text-align: center;
+      padding: 72px 24px 60px;
+    }
+    .hero h1 { font-size: 2.6rem; font-weight: 700; letter-spacing: -0.5px; }
+    .hero p  { margin-top: 12px; font-size: 1.15rem; opacity: .85; max-width: 560px; margin-inline: auto; }
+    .badges  { margin-top: 24px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+    .badge {
+      background: rgba(255,255,255,.15);
+      border: 1px solid rgba(255,255,255,.3);
+      color: #fff;
+      border-radius: 20px;
+      padding: 4px 14px;
+      font-size: .82rem;
+      font-weight: 600;
+    }
+
+    /* ── Layout ─────────────────────────────────────────────── */
+    .container { max-width: 860px; margin: 0 auto; padding: 0 24px; }
+
+    /* ── Section headings ───────────────────────────────────── */
+    section { padding: 52px 0; border-bottom: 1px solid var(--border); }
+    section:last-child { border-bottom: none; }
+    h2 {
+      font-size: 1.45rem;
+      font-weight: 700;
+      color: var(--primary);
+      margin-bottom: 20px;
+    }
+    h3 {
+      font-size: 1.05rem;
+      font-weight: 600;
+      margin: 28px 0 8px;
+      color: var(--text);
+    }
+    p  { margin-bottom: 14px; color: #2D3748; }
+    ul, ol { padding-left: 20px; margin-bottom: 14px; }
+    li { margin-bottom: 6px; color: #2D3748; }
+
+    /* ── Feature cards ──────────────────────────────────────── */
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+      margin-top: 8px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 22px 20px;
+    }
+    .card-icon { font-size: 1.6rem; margin-bottom: 10px; }
+    .card h3   { margin: 0 0 6px; font-size: .95rem; }
+    .card p    { font-size: .88rem; color: var(--muted); margin: 0; }
+
+    /* ── Steps ──────────────────────────────────────────────── */
+    .steps { counter-reset: step; }
+    .step {
+      display: flex;
+      gap: 18px;
+      margin-bottom: 28px;
+      align-items: flex-start;
+    }
+    .step-num {
+      counter-increment: step;
+      min-width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: var(--primary);
+      color: #fff;
+      font-weight: 700;
+      font-size: .9rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .step-num::before { content: counter(step); }
+    .step-body h3 { margin: 4px 0 4px; }
+    .step-body p  { margin: 0; font-size: .92rem; }
+
+    /* ── Code blocks ────────────────────────────────────────── */
+    pre, code {
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      font-size: .85rem;
+    }
+    pre {
+      background: #1A202C;
+      color: #E2E8F0;
+      border-radius: 8px;
+      padding: 18px 20px;
+      overflow-x: auto;
+      margin: 16px 0;
+    }
+    code {
+      background: var(--date-bg);
+      color: var(--primary2);
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+    pre code { background: none; color: inherit; padding: 0; }
+
+    /* ── Requirements table ─────────────────────────────────── */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0;
+      font-size: .9rem;
+    }
+    th {
+      background: var(--date-bg);
+      color: var(--primary2);
+      font-weight: 600;
+      text-align: left;
+      padding: 10px 14px;
+      border: 1px solid var(--border);
+    }
+    td {
+      padding: 9px 14px;
+      border: 1px solid var(--border);
+      vertical-align: top;
+    }
+    tr:nth-child(even) td { background: #F7FAFC; }
+
+    /* ── Warning box ────────────────────────────────────────── */
+    .callout {
+      border-left: 4px solid var(--warn);
+      background: #FFFBEB;
+      border-radius: 0 8px 8px 0;
+      padding: 14px 18px;
+      margin: 16px 0;
+      font-size: .9rem;
+      color: #744210;
+    }
+    .callout strong { color: #92400E; }
+
+    /* ── Footer ─────────────────────────────────────────────── */
+    footer {
+      text-align: center;
+      padding: 32px 24px;
+      font-size: .82rem;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Hero ──────────────────────────────────────────────────────── -->
+<div class="hero">
+  <h1>Jaamo Photo Downloader</h1>
+  <p>Browse, select, and download all daycare photos from the Jaamo parent portal — with EXIF metadata automatically added to every file.</p>
+  <div class="badges">
+    <span class="badge">Python 3.9+</span>
+    <span class="badge">macOS · Windows · Linux</span>
+    <span class="badge">SKSG / Jaamo</span>
+    <span class="badge">Open Source</span>
+  </div>
+</div>
+
+<!-- ── Features ──────────────────────────────────────────────────── -->
+<div class="container">
+<section>
+  <h2>What it does</h2>
+  <div class="cards">
+    <div class="card">
+      <div class="card-icon">🔐</div>
+      <h3>Secure login</h3>
+      <p>Logs in with your Jaamo credentials. Optionally saves them locally so you don't have to retype them.</p>
+    </div>
+    <div class="card">
+      <div class="card-icon">👶</div>
+      <h3>Child selector</h3>
+      <p>Automatically detects all children on your account. Pick one to browse their photos.</p>
+    </div>
+    <div class="card">
+      <div class="card-icon">🖼️</div>
+      <h3>Gallery view</h3>
+      <p>Photos grouped by date with captions. Scroll through everything in one view.</p>
+    </div>
+    <div class="card">
+      <div class="card-icon">✅</div>
+      <h3>Flexible selection</h3>
+      <p>Click individual photos, select a whole day, or grab everything at once.</p>
+    </div>
+    <div class="card">
+      <div class="card-icon">📍</div>
+      <h3>EXIF metadata</h3>
+      <p>Injects date, caption, and GPS location into every downloaded JPEG so your photos library stays organised.</p>
+    </div>
+    <div class="card">
+      <div class="card-icon">💾</div>
+      <h3>Smart filenames</h3>
+      <p>Files are named <code>SKSG_{name}_{date}_{original}.jpeg</code> — no guessing what's what.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ── Requirements ──────────────────────────────────────────────── -->
+<section>
+  <h2>Requirements</h2>
+  <table>
+    <tr><th>Requirement</th><th>Notes</th></tr>
+    <tr><td>Python 3.9 or newer</td><td>3.13 tested and supported</td></tr>
+    <tr><td>Jaamo parent account</td><td>Must be registered with SKSG</td></tr>
+    <tr><td>pip packages</td><td><code>requests</code>, <code>beautifulsoup4</code>, <code>Pillow</code>, <code>piexif</code></td></tr>
+  </table>
+
+  <h3>Install dependencies</h3>
+<pre><code>pip install requests beautifulsoup4 Pillow piexif</code></pre>
+
+  <p>Or install from the included file:</p>
+<pre><code>pip install -r requirements.txt</code></pre>
+</section>
+
+<!-- ── Installation ──────────────────────────────────────────────── -->
+<section>
+  <h2>Installation</h2>
+<pre><code>git clone https://github.com/your-username/jaamo-downloader.git
+cd jaamo-downloader
+pip install -r requirements.txt
+python3 app.py</code></pre>
+  <p>No build step, no installer — just run the script.</p>
+</section>
+
+<!-- ── Manual ─────────────────────────────────────────────────────── -->
+<section>
+  <h2>Manual</h2>
+
+  <div class="steps">
+
+    <div class="step">
+      <div class="step-num"></div>
+      <div class="step-body">
+        <h3>Start the app</h3>
+        <p>Run <code>python3 app.py</code>. The login screen appears.</p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num"></div>
+      <div class="step-body">
+        <h3>(Optional) Set GPS location</h3>
+        <p>Click <strong>GPS Location</strong> on the login screen to set the daycare's coordinates. These are embedded in the EXIF of every downloaded photo so they show up on a map in your photos app. The coordinates are validated to be within the Netherlands and saved for next time.</p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num"></div>
+      <div class="step-body">
+        <h3>Log in</h3>
+        <p>Enter your Jaamo e-mail and password and click <strong>Inloggen</strong>. Tick <em>Inloggegevens onthouden</em> to save your credentials locally (<code>~/.jaamo_credentials.json</code>, chmod 600) so you don't need to retype them next time.</p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num"></div>
+      <div class="step-body">
+        <h3>Select a child</h3>
+        <p>If your account has multiple children a selector screen appears. Click the card for the child whose photos you want to browse. If there is only one child the gallery opens directly.</p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num"></div>
+      <div class="step-body">
+        <h3>Browse the gallery</h3>
+        <p>Photos are shown grouped by date. Scroll down to see older photos. Captions appear below each thumbnail where available.</p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num"></div>
+      <div class="step-body">
+        <h3>Select photos to download</h3>
+        <p>You have three ways to select:</p>
+        <ul>
+          <li><strong>Click a photo</strong> — selects or deselects that single photo (blue border = selected).</li>
+          <li><strong>Selecteer dag</strong> button — selects or deselects all photos for that date group.</li>
+          <li><strong>Selecteer alles</strong> in the toolbar — selects every photo in the gallery.</li>
+        </ul>
+        <p>The toolbar shows how many photos are selected.</p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num"></div>
+      <div class="step-body">
+        <h3>Download</h3>
+        <p>Two download options:</p>
+        <ul>
+          <li><strong>Download selectie (N)</strong> — saves all N selected photos to a folder you choose.</li>
+          <li><strong>Download dag</strong> (per date group) — saves all photos from that day to a folder you choose.</li>
+        </ul>
+        <p>Each file is saved as <code>SKSG_{firstname}_{date}_{original}.jpeg</code>, for example <code>SKSG_Emma_15-march-2026_IMG_0558.jpeg</code>.</p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num"></div>
+      <div class="step-body">
+        <h3>Refresh if URLs expire</h3>
+        <p>Photo URLs are valid for <strong>10 minutes</strong>. If you leave the app open and then try to download, you may get errors. Click <strong>Vernieuwen</strong> in the toolbar to reload fresh URLs.</p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num"></div>
+      <div class="step-body">
+        <h3>Switch child (← Terug)</h3>
+        <p>If you have multiple children, a <strong>← Terug</strong> button appears in the toolbar. Click it to go back to the child selector without logging in again.</p>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="callout">
+    <strong>Note:</strong> Downloaded photos have EXIF metadata (date, caption, GPS) injected automatically. The server strips all metadata on upload, so the app re-adds it on every save.
+  </div>
+</section>
+
+<!-- ── EXIF details ───────────────────────────────────────────────── -->
+<section>
+  <h2>What gets written to each photo</h2>
+  <table>
+    <tr><th>Field</th><th>Value</th></tr>
+    <tr><td>Date / DateTimeOriginal</td><td>Date shown in the gallery (time set to noon)</td></tr>
+    <tr><td>Image description</td><td>Caption from the gallery, if present</td></tr>
+    <tr><td>GPS coordinates</td><td>Daycare location — configurable via GPS Location on the login screen</td></tr>
+    <tr><td>File modification time</td><td>Set to the photo date so Finder/Explorer sorts correctly</td></tr>
+  </table>
+</section>
+
+<!-- ── Privacy ───────────────────────────────────────────────────── -->
+<section>
+  <h2>Privacy &amp; security</h2>
+  <ul>
+    <li>Credentials are stored only on your own machine (<code>~/.jaamo_credentials.json</code>) with file permissions set to owner-only (chmod 600).</li>
+    <li>GPS settings are stored in <code>~/.jaamo_settings.json</code>.</li>
+    <li>No data is sent anywhere other than the Jaamo server you are already authenticated with.</li>
+    <li>The app contains no telemetry, tracking, or analytics of any kind.</li>
+  </ul>
+</section>
+
+<!-- ── Troubleshooting ───────────────────────────────────────────── -->
+<section>
+  <h2>Troubleshooting</h2>
+
+  <h3>Login fails</h3>
+  <p>Double-check your email and password on the Jaamo website first. Make sure you are using the SKSG organisation account, not a personal Jaamo account.</p>
+
+  <h3>Photos fail to download (403 error)</h3>
+  <p>The photo URLs expire after 10 minutes. Click <strong>Vernieuwen</strong> to reload fresh URLs, then try the download again.</p>
+
+  <h3>App doesn't start</h3>
+  <p>Make sure all dependencies are installed: <code>pip install requests beautifulsoup4 Pillow piexif</code>. Python 3.9 or newer is required.</p>
+
+  <h3>Thumbnails don't load</h3>
+  <p>This can happen on a slow connection. Wait a moment and try scrolling — thumbnails load in the background. Click <strong>Vernieuwen</strong> if they never appear.</p>
+</section>
+
+</div><!-- /container -->
+
+<footer>
+  Jaamo Photo Downloader &mdash; open source, no affiliation with Jaamo or SKSG
+</footer>
+
+</body>
+</html>

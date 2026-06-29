@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+~/.jaamo_credentials.json
+~/.jaamo_settings.json
