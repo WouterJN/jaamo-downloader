@@ -203,7 +203,7 @@
     <div class="card">
       <div class="card-icon">👶</div>
       <h3>Child selector</h3>
-      <p>Automatically detects all children on your account. Pick one to browse their photos.</p>
+      <p>Automatically detects all children on your account. Choose <strong>Foto's</strong> or <strong>Dagboek</strong> per child.</p>
     </div>
     <div class="card">
       <div class="card-icon">🖼️</div>
@@ -224,6 +224,11 @@
       <div class="card-icon">💾</div>
       <h3>Smart filenames</h3>
       <p>Files are named <code>SKSG_{name}_{date}_{original}.jpeg</code> — no guessing what's what.</p>
+    </div>
+    <div class="card">
+      <div class="card-icon">📖</div>
+      <h3>Diary (dagboek)</h3>
+      <p>Read all diary entries in-app in a scrollable view. Download everything as a single HTML file you can print or archive.</p>
     </div>
   </div>
 </section>
@@ -288,8 +293,12 @@ python3 app.py</code></pre>
     <div class="step">
       <div class="step-num"></div>
       <div class="step-body">
-        <h3>Select a child</h3>
-        <p>If your account has multiple children a selector screen appears. Click the card for the child whose photos you want to browse. If there is only one child the gallery opens directly.</p>
+        <h3>Select a child and mode</h3>
+        <p>The child selector always appears after login. Under each child you'll find two buttons:</p>
+        <ul>
+          <li><strong>Foto's</strong> — opens the photo gallery for that child.</li>
+          <li><strong>Dagboek</strong> — opens the diary view for that child.</li>
+        </ul>
       </div>
     </div>
 
@@ -339,8 +348,16 @@ python3 app.py</code></pre>
     <div class="step">
       <div class="step-num"></div>
       <div class="step-body">
-        <h3>Switch child (← Terug)</h3>
-        <p>If you have multiple children, a <strong>← Terug</strong> button appears in the toolbar. Click it to go back to the child selector without logging in again.</p>
+        <h3>Read the diary</h3>
+        <p>Clicking <strong>Dagboek</strong> loads all diary entries and displays them in a scrollable view. Each entry shows the date, time, and full text. Once loaded, click <strong>Download dagboek</strong> in the toolbar to save everything as a single HTML file — which you can open in any browser and print to PDF.</p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num"></div>
+      <div class="step-body">
+        <h3>Switch child or mode (← Terug)</h3>
+        <p>A <strong>← Terug</strong> button in the toolbar always takes you back to the child selector, where you can switch child or switch between Foto's and Dagboek.</p>
       </div>
     </div>
 

@@ -14,6 +14,9 @@ Coverage:
   - Gallery HTML parsing   (replicates _fetch_photos logic)
   - Accounts HTML parsing  (replicates _fetch_children logic)
   - Credential file I/O    (save / load / clear / permissions)
+  - Diary stories listing  (replicates _fetch_diary_entries list logic)
+  - Diary story page       (replicates _fetch_diary_entries per-page logic)
+  - Diary HTML building    (replicates _build_diary_html logic)
 
 Note: JaamoApp itself is not instantiated here — it requires a live Tk display.
 All tests target module-level helpers and replicated parsing logic.
@@ -98,6 +101,77 @@ def _parse_gallery_html(html):
     if current_entries:
         groups.append({"date": current_date, "entries": current_entries})
     return groups
+
+
+def _parse_stories_html(html, child_id):
+    """
+    Replicate the story-ID extraction from JaamoApp._fetch_diary_entries.
+    Returns a list of unique numeric story ID strings in page order.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    seen, story_ids = set(), []
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
+        if f"/children/{child_id}/stories/" in href:
+            sid = href.rstrip("/").rsplit("/", 1)[-1]
+            if sid.isdigit() and sid not in seen:
+                seen.add(sid)
+                story_ids.append(sid)
+    return story_ids
+
+
+def _parse_story_page(html):
+    """
+    Replicate the per-story parsing from JaamoApp._fetch_diary_entries.
+    Returns {"date": str, "time": str, "paras": [str, ...]}.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    h1   = soup.find("h1")
+    date = h1.get_text(" ", strip=True) if h1 else ""
+
+    time_div = soup.find(
+        "div", class_=lambda c: c and "font_semi_bold" in c and "text_dark_grey" in c)
+    time_str = time_div.get_text(strip=True) if time_div else ""
+
+    text_div = soup.find(
+        "div", class_=lambda c: c and "font_small" in c and "text_dark_grey" in c)
+    paras: list = []
+    if text_div:
+        seen_p: set = set()
+        for p in text_div.find_all("p"):
+            t = p.get_text(strip=True)
+            if t and t not in seen_p:
+                seen_p.add(t)
+                paras.append(t)
+
+    return {"date": date, "time": time_str, "paras": paras}
+
+
+def _build_diary_html(entries, first_name, today="01-01-2026"):
+    """
+    Replicate JaamoApp._build_diary_html for testing without a Tk instance.
+    """
+    cards = []
+    for e in entries:
+        time_html  = f'<div class="time">{e["time"]}</div>' if e["time"] else ""
+        paras_html = "".join(f"<p>{p}</p>" for p in e["paras"])
+        cards.append(
+            f'<div class="entry">'
+            f'<div class="date">{e["date"]}</div>'
+            f'{time_html}'
+            f'<div class="text">{paras_html}</div>'
+            f'</div>'
+        )
+    return (
+        f'<!DOCTYPE html>\n<html lang="nl">\n<head>\n'
+        f'  <meta charset="UTF-8"/>\n'
+        f'  <title>Dagboek van {first_name}</title>\n'
+        f'</head>\n<body>\n'
+        f'  <h1>Dagboek van {first_name}</h1>\n'
+        f'  <p class="sub">Gedownload op {today} &middot; {len(entries)} berichten</p>\n'
+        + "".join(cards) +
+        f'\n</body>\n</html>'
+    )
 
 
 def _parse_accounts_html(html):
@@ -202,6 +276,50 @@ ACCOUNTS_HTML_NO_IMG_ALT = """
   <a href="/ouders/children/555">
     <span>no image tag here</span>
   </a>
+</body></html>
+"""
+
+# Diary: stories list page — as returned by /ouders/children/{id}/stories
+STORIES_HTML = """
+<html><body>
+  <a href="/ouders/children/12497/stories/244244">Bericht 1</a>
+  <a href="/ouders/children/12497/stories/244244">Bericht 1 (duplicate link)</a>
+  <a href="/ouders/children/12497/stories/243260">Bericht 2</a>
+  <a href="/ouders/children/12497/stories/237958">Bericht 3</a>
+  <a href="/ouders/children/12497/stories/new">Nieuw bericht knop — geen getal, must be ignored</a>
+  <a href="/ouders/children/12497/stories">Terug — no story ID, ignored</a>
+  <a href="/ouders/accounts">Account link — ignored</a>
+</body></html>
+"""
+
+# Diary: individual story page — as returned by /ouders/children/{id}/stories/{sid}
+STORY_PAGE_HTML = """
+<html><body>
+  <div class="stories">
+    <div class="container-fluid">
+      <h1 class="py-2 ps-1 m-0">
+        <i class="mdi mdi-book-outline"></i>
+        20 mei 2026
+      </h1>
+      <div class="px-1">
+        <div class="font_semi_bold text_dark_grey pb-2">08:10</div>
+        <div class="font_small text_dark_grey pb-1">
+          <p><p>Beste ouder/verzorger</p></p>
+          <p><p>Vandaag hebben we buiten gespeeld.</p></p>
+          <p><p>Groetjes de flamingos</p></p>
+          <p><p>Beste ouder/verzorger</p></p>
+        </div>
+      </div>
+    </div>
+  </div>
+</body></html>
+"""
+
+STORY_PAGE_NO_TEXT_HTML = """
+<html><body>
+  <div class="stories">
+    <h1 class="py-2 ps-1 m-0"><i class="mdi mdi-book-outline"></i> 15 jan 2026</h1>
+  </div>
 </body></html>
 """
 
@@ -753,6 +871,132 @@ class TestCredentialFile(unittest.TestCase):
                 os.remove(path)
             except FileNotFoundError:
                 pass   # expected
+
+
+# ── 11. Diary stories list parsing ───────────────────────────────────────────
+
+class TestStoriesHtmlParsing(unittest.TestCase):
+
+    def setUp(self):
+        self.ids = _parse_stories_html(STORIES_HTML, "12497")
+
+    def test_three_unique_ids_found(self):
+        self.assertEqual(len(self.ids), 3)
+
+    def test_correct_ids_extracted(self):
+        self.assertEqual(self.ids, ["244244", "243260", "237958"])
+
+    def test_order_preserved(self):
+        self.assertEqual(self.ids[0], "244244")
+        self.assertEqual(self.ids[1], "243260")
+
+    def test_duplicate_link_deduplicated(self):
+        self.assertEqual(self.ids.count("244244"), 1)
+
+    def test_non_numeric_path_ignored(self):
+        # "new" is not a digit string
+        self.assertNotIn("new", self.ids)
+
+    def test_non_story_links_ignored(self):
+        self.assertNotIn("accounts", self.ids)
+
+    def test_empty_page_returns_empty(self):
+        result = _parse_stories_html("<html><body>nothing</body></html>", "12497")
+        self.assertEqual(result, [])
+
+    def test_wrong_child_id_ignored(self):
+        result = _parse_stories_html(STORIES_HTML, "99999")
+        self.assertEqual(result, [])
+
+
+# ── 12. Diary story page parsing ─────────────────────────────────────────────
+
+class TestStoryPageParsing(unittest.TestCase):
+
+    def setUp(self):
+        self.entry = _parse_story_page(STORY_PAGE_HTML)
+
+    def test_date_extracted(self):
+        self.assertIn("20 mei 2026", self.entry["date"])
+
+    def test_time_extracted(self):
+        self.assertEqual(self.entry["time"], "08:10")
+
+    def test_three_unique_paragraphs(self):
+        # "Beste ouder/verzorger" appears twice in fixture — must be deduplicated
+        self.assertEqual(len(self.entry["paras"]), 3)
+
+    def test_paragraph_content(self):
+        self.assertIn("Vandaag hebben we buiten gespeeld.", self.entry["paras"])
+
+    def test_duplicate_paragraph_deduplicated(self):
+        self.assertEqual(self.entry["paras"].count("Beste ouder/verzorger"), 1)
+
+    def test_missing_time_gives_empty_string(self):
+        entry = _parse_story_page(STORY_PAGE_NO_TEXT_HTML)
+        self.assertEqual(entry["time"], "")
+
+    def test_missing_text_gives_empty_paras(self):
+        entry = _parse_story_page(STORY_PAGE_NO_TEXT_HTML)
+        self.assertEqual(entry["paras"], [])
+
+    def test_missing_h1_gives_empty_date(self):
+        entry = _parse_story_page("<html><body></body></html>")
+        self.assertEqual(entry["date"], "")
+
+    def test_result_has_required_keys(self):
+        self.assertIn("date",  self.entry)
+        self.assertIn("time",  self.entry)
+        self.assertIn("paras", self.entry)
+
+
+# ── 13. Diary HTML building ───────────────────────────────────────────────────
+
+class TestBuildDiaryHtml(unittest.TestCase):
+
+    ENTRIES = [
+        {"date": "20 mei 2026", "time": "08:10",
+         "paras": ["Beste ouder/verzorger", "Vandaag hebben we gespeeld."]},
+        {"date": "15 jan 2026", "time": "",
+         "paras": ["Voeding: 9:00 50cc", "Slapen: 10:00-11:00"]},
+    ]
+
+    def setUp(self):
+        self.html = _build_diary_html(self.ENTRIES, "Emma")
+
+    def test_returns_string(self):
+        self.assertIsInstance(self.html, str)
+
+    def test_is_valid_html(self):
+        self.assertIn("<!DOCTYPE html>", self.html)
+
+    def test_child_name_in_title(self):
+        self.assertIn("Emma", self.html)
+
+    def test_entry_count_shown(self):
+        self.assertIn("2 berichten", self.html)
+
+    def test_dates_in_output(self):
+        self.assertIn("20 mei 2026", self.html)
+        self.assertIn("15 jan 2026", self.html)
+
+    def test_time_shown_when_present(self):
+        self.assertIn("08:10", self.html)
+
+    def test_no_time_div_when_time_empty(self):
+        # second entry has no time — its time div must be absent
+        soup   = BeautifulSoup(self.html, "html.parser")
+        entries = soup.find_all("div", class_="entry")
+        times   = entries[1].find("div", class_="time")
+        self.assertIsNone(times)
+
+    def test_paragraph_text_in_output(self):
+        self.assertIn("Vandaag hebben we gespeeld.", self.html)
+        self.assertIn("Slapen: 10:00-11:00", self.html)
+
+    def test_empty_entries_gives_zero_count(self):
+        html = _build_diary_html([], "Emma")
+        self.assertIn("0 berichten", html)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

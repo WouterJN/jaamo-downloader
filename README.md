@@ -7,11 +7,12 @@ Tested with **SKSG** (`sksg.jaamo.nl`). Should work for other daycares on the Ja
 ## Features
 
 - Secure login with optional saved credentials
-- Automatic child detection — pick from all children on your account
+- Child selector with **Foto's** and **Dagboek** per child
 - Gallery view grouped by date with captions
 - Select individual photos, a full day, or everything at once
 - EXIF metadata (date, caption, GPS location) written into every downloaded JPEG
 - Smart filenames: `SKSG_{name}_{date}_{original}.jpeg`
+- Scrollable **diary** (dagboek) view — read all entries in-app and download as HTML
 
 ## Requirements
 
