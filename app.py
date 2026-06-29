@@ -1,7 +1,8 @@
 """
 Jaamo Photo Downloader
-Logs into the SKSG Jaamo parent portal, lists children, and lets a parent
+Logs into the Jaamo parent portal, lists children, and lets a parent
 browse, select, and download photos with EXIF metadata injected on save.
+Works with any daycare using the Jaamo platform.
 """
 
 import datetime

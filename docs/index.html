@@ -181,11 +181,11 @@
 <!-- ── Hero ──────────────────────────────────────────────────────── -->
 <div class="hero">
   <h1>Jaamo Photo Downloader</h1>
-  <p>Browse, select, and download all daycare photos from the Jaamo parent portal — with EXIF metadata automatically added to every file.</p>
+  <p>Browse, select, and download all daycare photos from the Jaamo parent portal — with EXIF metadata automatically added to every file. Works with any daycare using the Jaamo platform.</p>
   <div class="badges">
     <span class="badge">Python 3.9+</span>
     <span class="badge">macOS · Windows · Linux</span>
-    <span class="badge">SKSG / Jaamo</span>
+    <span class="badge">Jaamo platform</span>
     <span class="badge">Open Source</span>
   </div>
 </div>
@@ -234,7 +234,7 @@
   <table>
     <tr><th>Requirement</th><th>Notes</th></tr>
     <tr><td>Python 3.9 or newer</td><td>3.13 tested and supported</td></tr>
-    <tr><td>Jaamo parent account</td><td>Must be registered with SKSG</td></tr>
+    <tr><td>Jaamo parent account</td><td>Any daycare using the Jaamo platform</td></tr>
     <tr><td>pip packages</td><td><code>requests</code>, <code>beautifulsoup4</code>, <code>Pillow</code>, <code>piexif</code></td></tr>
   </table>
 
@@ -379,7 +379,7 @@ python3 app.py</code></pre>
   <h2>Troubleshooting</h2>
 
   <h3>Login fails</h3>
-  <p>Double-check your email and password on the Jaamo website first. Make sure you are using the SKSG organisation account, not a personal Jaamo account.</p>
+  <p>Double-check your email and password on the Jaamo website first. Make sure you are using your daycare's organisation account.</p>
 
   <h3>Photos fail to download (403 error)</h3>
   <p>The photo URLs expire after 10 minutes. Click <strong>Vernieuwen</strong> to reload fresh URLs, then try the download again.</p>
@@ -394,7 +394,7 @@ python3 app.py</code></pre>
 </div><!-- /container -->
 
 <footer>
-  Jaamo Photo Downloader &mdash; open source, no affiliation with Jaamo or SKSG
+  Jaamo Photo Downloader &mdash; open source, no affiliation with Jaamo
 </footer>
 
 </body>
