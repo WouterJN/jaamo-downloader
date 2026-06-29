@@ -1,6 +1,6 @@
-# Jaamo Photo Downloader
+# Jaamo Downloader
 
-A Python desktop app that logs into the Jaamo parent portal and lets you browse, select, and download all photos of your child — with EXIF metadata (date, caption, GPS) automatically injected into every file.
+A Python desktop app that logs into the Jaamo parent portal and gives you full access to your child's **photos** and **diary** (dagboek) — all in one place.
 
 Tested with **SKSG** (`sksg.jaamo.nl`). Should work for other daycares on the Jaamo platform by changing the URL constants at the top of `app.py`.
 
@@ -8,11 +8,10 @@ Tested with **SKSG** (`sksg.jaamo.nl`). Should work for other daycares on the Ja
 
 - Secure login with optional saved credentials
 - Child selector with **Foto's** and **Dagboek** per child
-- Gallery view grouped by date with captions
-- Select individual photos, a full day, or everything at once
+- **Photos:** gallery view grouped by date with captions; select and download individual photos, a full day, or everything at once
 - EXIF metadata (date, caption, GPS location) written into every downloaded JPEG
 - Smart filenames: `SKSG_{name}_{date}_{original}.jpeg`
-- Scrollable **diary** (dagboek) view — read all entries in-app and download as HTML
+- **Diary:** scrollable view of all entries in-app; download everything as a single HTML file
 
 ## Requirements
 
