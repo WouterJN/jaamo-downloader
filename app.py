@@ -480,12 +480,10 @@ class JaamoApp:
     def _on_children_loaded(self, children):
         self._spinner.destroy()
         self._children = children
-        if len(children) == 1:
-            self._start_gallery(children[0]["id"], children[0]["name"])
-        elif len(children) > 1:
-            self._show_child_selector(children)
-        else:
+        if len(children) == 0:
             self._on_children_error("Geen kinderen gevonden in het account.")
+        else:
+            self._show_child_selector(children)
 
     def _on_children_error(self, msg):
         try:
@@ -528,9 +526,15 @@ class JaamoApp:
                 tk.Label(child_card, image=photo, bg=CARD).pack(pady=(0, 8))
 
             ttk.Label(child_card, text=child["name"], style="Card.TLabel").pack(pady=(0, 10))
-            ttk.Button(child_card, text="Foto's bekijken", style="Primary.TButton",
+
+            btn_row = ttk.Frame(child_card, style="Card.TFrame")
+            btn_row.pack(fill="x")
+            ttk.Button(btn_row, text="Foto's", style="Primary.TButton",
                        command=lambda c=child, o=outer: (o.destroy(), self._start_gallery(c["id"], c["name"]))
-                       ).pack(fill="x")
+                       ).pack(side="left", fill="x", expand=True, padx=(0, 4))
+            ttk.Button(btn_row, text="Dagboek", style="Ghost.TButton",
+                       command=lambda c=child, o=outer: (o.destroy(), self._start_diary_mode(c["id"], c["name"]))
+                       ).pack(side="left", fill="x", expand=True)
 
     def _start_gallery(self, child_id, child_name):
         self._child_id   = child_id
@@ -553,9 +557,8 @@ class JaamoApp:
         bar = ttk.Frame(self._gallery_frame, style="Card.TFrame", padding=(16, 10))
         bar.pack(fill="x")
 
-        if len(self._children) > 1:
-            ttk.Button(bar, text="← Terug", style="Ghost.TButton",
-                       command=self._back_to_child_selector).pack(side="left", padx=(0, 12))
+        ttk.Button(bar, text="← Terug", style="Ghost.TButton",
+                   command=self._back_to_child_selector).pack(side="left", padx=(0, 12))
 
         ttk.Label(bar, text=f"Foto's — {self._child_name}", style="BarTitle.TLabel").pack(side="left")
 
@@ -688,6 +691,67 @@ class JaamoApp:
     def _back_to_child_selector(self):
         self._gallery_frame.destroy()
         self._show_child_selector(self._children)
+
+    # ── Diary frame ───────────────────────────────────────────────────────────
+
+    def _start_diary_mode(self, child_id, child_name):
+        self._child_id   = child_id
+        self._child_name = child_name
+        self._setup_diary_frame()
+
+    def _setup_diary_frame(self):
+        self._diary_frame = ttk.Frame(self.root)
+        self._diary_frame.pack(fill="both", expand=True)
+
+        # Toolbar
+        bar = ttk.Frame(self._diary_frame, style="Card.TFrame", padding=(16, 10))
+        bar.pack(fill="x")
+        ttk.Button(bar, text="← Terug", style="Ghost.TButton",
+                   command=self._back_from_diary).pack(side="left", padx=(0, 12))
+        ttk.Label(bar, text=f"Dagboek — {self._child_name}",
+                  style="BarTitle.TLabel").pack(side="left")
+
+        tk.Frame(self._diary_frame, height=1, bg=BORDER).pack(fill="x")
+
+        # Centred download card
+        body = ttk.Frame(self._diary_frame)
+        body.pack(fill="both", expand=True)
+        body.columnconfigure(0, weight=1)
+        body.rowconfigure(0, weight=1)
+
+        inner = ttk.Frame(body, style="Card.TFrame", padding=40)
+        inner.grid(row=0, column=0)
+
+        first_name = self._child_name.split()[0]
+        ttk.Label(inner, text="Dagboek",                        style="Title.TLabel").pack(pady=(0, 4))
+        ttk.Label(inner, text=f"Download het dagboek van {first_name}", style="Sub.TLabel"  ).pack(pady=(0, 20))
+
+        self._diary_progress_var = tk.StringVar(value="")
+        ttk.Label(inner, textvariable=self._diary_progress_var,
+                  style="Bar.TLabel").pack(pady=(0, 10))
+
+        self._diary_dl_btn = ttk.Button(inner, text="Download dagboek",
+                                        style="Primary.TButton",
+                                        command=self._trigger_diary_download)
+        self._diary_dl_btn.pack(fill="x")
+
+    def _back_from_diary(self):
+        self._diary_frame.destroy()
+        self._show_child_selector(self._children)
+
+    def _trigger_diary_download(self):
+        first_name = self._child_name.split()[0]
+        path = filedialog.asksaveasfilename(
+            title="Dagboek opslaan als…",
+            defaultextension=".html",
+            filetypes=[("HTML bestand", "*.html"), ("Alle bestanden", "*.*")],
+            initialfile=f"{first_name}_dagboek.html",
+        )
+        if not path:
+            return
+        self._diary_dl_btn.config(state="disabled")
+        self._diary_progress_var.set("Dagboek ophalen…")
+        threading.Thread(target=self._fetch_diary, args=(path,), daemon=True).start()
 
     # ── Photo loading ─────────────────────────────────────────────────────────
 
@@ -996,21 +1060,6 @@ class JaamoApp:
 
     # ── Diary ─────────────────────────────────────────────────────────────────
 
-    def _download_diary(self):
-        """Prompt for save path then fetch all diary stories in a worker thread."""
-        first_name = self._child_name.split()[0]
-        path = filedialog.asksaveasfilename(
-            title="Dagboek opslaan als…",
-            defaultextension=".html",
-            filetypes=[("HTML bestand", "*.html"), ("Alle bestanden", "*.*")],
-            initialfile=f"{first_name}_dagboek.html",
-        )
-        if not path:
-            return
-        self.diary_btn.config(state="disabled")
-        self.progress_var.set("Dagboek ophalen…")
-        threading.Thread(target=self._fetch_diary, args=(path,), daemon=True).start()
-
     def _fetch_diary(self, path):
         """Worker thread: fetch every story page and save as a single HTML file."""
         try:
@@ -1032,7 +1081,7 @@ class JaamoApp:
 
             for i, sid in enumerate(story_ids):
                 self.root.after(0, lambda n=i + 1, t=total:
-                                self.progress_var.set(f"Dagboek: {n}/{t}…"))
+                                self._diary_progress_var.set(f"Dagboek: {n}/{t}…"))
                 try:
                     r2   = self.session.get(
                         f"{BASE_URL}/ouders/children/{self._child_id}/stories/{sid}",
@@ -1070,16 +1119,16 @@ class JaamoApp:
                 f.write(html)
 
             def _done():
-                self.progress_var.set(f"{self._total_count} foto's geladen")
-                self.diary_btn.config(state="normal")
+                self._diary_progress_var.set(f"{len(entries)} berichten opgeslagen ✓")
+                self._diary_dl_btn.config(state="normal")
                 messagebox.showinfo("Dagboek opgeslagen",
                                     f"{len(entries)} berichten opgeslagen in:\n{path}")
             self.root.after(0, _done)
 
         except Exception as e:
             msg = str(e)
-            self.root.after(0, lambda: self.progress_var.set(f"Dagboek fout: {msg}"))
-            self.root.after(0, lambda: self.diary_btn.config(state="normal"))
+            self.root.after(0, lambda: self._diary_progress_var.set(f"Fout: {msg}"))
+            self.root.after(0, lambda: self._diary_dl_btn.config(state="normal"))
 
     def _build_diary_html(self, entries):
         """Build a self-contained HTML file from parsed diary entries."""
