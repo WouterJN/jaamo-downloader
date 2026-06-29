@@ -533,6 +533,7 @@ class JaamoApp:
                        ).pack(fill="x")
 
     def _start_gallery(self, child_id, child_name):
+        self._child_id   = child_id
         self._photos_url = f"{BASE_URL}/ouders/children/{child_id}/photos"
         self._child_name = child_name
         self._setup_gallery_frame()
@@ -571,6 +572,10 @@ class JaamoApp:
 
         ttk.Button(bar, text="Vernieuwen", style="Primary.TButton",
                    command=self._load_photos).pack(side="right", padx=(6, 0))
+
+        self.diary_btn = ttk.Button(bar, text="Dagboek", style="Ghost.TButton",
+                                    command=self._download_diary)
+        self.diary_btn.pack(side="right", padx=(6, 0))
 
         self.progress_var  = tk.StringVar(value="Foto's laden…")
         self.selection_var = tk.StringVar(value="")
@@ -988,6 +993,141 @@ class JaamoApp:
             self._update_selection_bar()
 
         self.root.after(0, _done)
+
+    # ── Diary ─────────────────────────────────────────────────────────────────
+
+    def _download_diary(self):
+        """Prompt for save path then fetch all diary stories in a worker thread."""
+        first_name = self._child_name.split()[0]
+        path = filedialog.asksaveasfilename(
+            title="Dagboek opslaan als…",
+            defaultextension=".html",
+            filetypes=[("HTML bestand", "*.html"), ("Alle bestanden", "*.*")],
+            initialfile=f"{first_name}_dagboek.html",
+        )
+        if not path:
+            return
+        self.diary_btn.config(state="disabled")
+        self.progress_var.set("Dagboek ophalen…")
+        threading.Thread(target=self._fetch_diary, args=(path,), daemon=True).start()
+
+    def _fetch_diary(self, path):
+        """Worker thread: fetch every story page and save as a single HTML file."""
+        try:
+            stories_url = f"{BASE_URL}/ouders/children/{self._child_id}/stories"
+            soup = BeautifulSoup(self.session.get(stories_url, timeout=15).text, "html.parser")
+
+            # Collect unique story IDs in the order they appear on the page
+            seen, story_ids = set(), []
+            for a in soup.find_all("a", href=True):
+                href = a["href"]
+                if f"/children/{self._child_id}/stories/" in href:
+                    sid = href.rstrip("/").rsplit("/", 1)[-1]
+                    if sid.isdigit() and sid not in seen:
+                        seen.add(sid)
+                        story_ids.append(sid)
+
+            total   = len(story_ids)
+            entries = []
+
+            for i, sid in enumerate(story_ids):
+                self.root.after(0, lambda n=i + 1, t=total:
+                                self.progress_var.set(f"Dagboek: {n}/{t}…"))
+                try:
+                    r2   = self.session.get(
+                        f"{BASE_URL}/ouders/children/{self._child_id}/stories/{sid}",
+                        timeout=15)
+                    soup2 = BeautifulSoup(r2.text, "html.parser")
+
+                    # Date from <h1> — the <i> icon has no text so get_text is clean
+                    h1   = soup2.find("h1")
+                    date = h1.get_text(" ", strip=True) if h1 else ""
+
+                    # Time from first div with both font_semi_bold and text_dark_grey classes
+                    time_div = soup2.find(
+                        "div", class_=lambda c: c and "font_semi_bold" in c and "text_dark_grey" in c)
+                    time_str = time_div.get_text(strip=True) if time_div else ""
+
+                    # Text from div with font_small and text_dark_grey classes
+                    text_div = soup2.find(
+                        "div", class_=lambda c: c and "font_small" in c and "text_dark_grey" in c)
+                    paras = []
+                    if text_div:
+                        seen_p: set = set()
+                        for p in text_div.find_all("p"):
+                            t = p.get_text(strip=True)
+                            if t and t not in seen_p:
+                                seen_p.add(t)
+                                paras.append(t)
+
+                    if date or paras:
+                        entries.append({"date": date, "time": time_str, "paras": paras})
+                except Exception:
+                    pass
+
+            html = self._build_diary_html(entries)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(html)
+
+            def _done():
+                self.progress_var.set(f"{self._total_count} foto's geladen")
+                self.diary_btn.config(state="normal")
+                messagebox.showinfo("Dagboek opgeslagen",
+                                    f"{len(entries)} berichten opgeslagen in:\n{path}")
+            self.root.after(0, _done)
+
+        except Exception as e:
+            msg = str(e)
+            self.root.after(0, lambda: self.progress_var.set(f"Dagboek fout: {msg}"))
+            self.root.after(0, lambda: self.diary_btn.config(state="normal"))
+
+    def _build_diary_html(self, entries):
+        """Build a self-contained HTML file from parsed diary entries."""
+        first_name = self._child_name.split()[0]
+        today      = datetime.date.today().strftime("%d-%m-%Y")
+
+        cards = []
+        for e in entries:
+            time_html = (f'<div class="time">{e["time"]}</div>') if e["time"] else ""
+            paras_html = "".join(f"<p>{p}</p>" for p in e["paras"])
+            cards.append(
+                f'<div class="entry">'
+                f'<div class="date">{e["date"]}</div>'
+                f'{time_html}'
+                f'<div class="text">{paras_html}</div>'
+                f'</div>'
+            )
+
+        return f"""<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8"/>
+  <title>Dagboek van {first_name}</title>
+  <style>
+    *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    body {{
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #F0F4F8; color: #1A202C;
+      max-width: 760px; margin: 0 auto; padding: 32px 16px;
+    }}
+    h1   {{ color: #2B6CB0; font-size: 1.8rem; margin-bottom: 4px; }}
+    .sub {{ color: #718096; font-size: .88rem; margin-bottom: 36px; }}
+    .entry {{
+      background: #fff; border: 1px solid #CBD5E0; border-radius: 10px;
+      padding: 18px 22px; margin-bottom: 14px;
+    }}
+    .date {{ font-weight: 700; color: #2B6CB0; font-size: 1rem; margin-bottom: 2px; }}
+    .time {{ color: #718096; font-size: .82rem; margin-bottom: 10px; }}
+    .text p {{ line-height: 1.65; margin-bottom: 8px; }}
+    .text p:last-child {{ margin-bottom: 0; }}
+  </style>
+</head>
+<body>
+  <h1>Dagboek van {first_name}</h1>
+  <p class="sub">Gedownload op {today} &middot; {len(entries)} berichten</p>
+  {"".join(cards)}
+</body>
+</html>"""
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
