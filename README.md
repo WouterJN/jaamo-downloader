@@ -2,6 +2,8 @@
 
 A Python desktop app that logs into the Jaamo parent portal and gives you full access to your child's **photos** and **diary** (dagboek) — all in one place.
 
+Perfect for building a lasting archive of your child's time at daycare: every photo with proper metadata and every diary entry saved locally, independent of whether the Jaamo platform stays online.
+
 Tested with **SKSG** (`sksg.jaamo.nl`). Should work for other daycares on the Jaamo platform by changing the URL constants at the top of `app.py`.
 
 ## Features
