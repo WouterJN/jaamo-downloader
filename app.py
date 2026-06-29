@@ -700,40 +700,61 @@ class JaamoApp:
         self._setup_diary_frame()
 
     def _setup_diary_frame(self):
-        self._diary_frame = ttk.Frame(self.root)
+        self._diary_frame   = ttk.Frame(self.root)
         self._diary_frame.pack(fill="both", expand=True)
+        self._diary_entries = []
 
-        # Toolbar
+        # ── Toolbar ───────────────────────────────────────────────────────────
         bar = ttk.Frame(self._diary_frame, style="Card.TFrame", padding=(16, 10))
         bar.pack(fill="x")
         ttk.Button(bar, text="← Terug", style="Ghost.TButton",
                    command=self._back_from_diary).pack(side="left", padx=(0, 12))
         ttk.Label(bar, text=f"Dagboek — {self._child_name}",
                   style="BarTitle.TLabel").pack(side="left")
+        self._diary_dl_btn = ttk.Button(bar, text="Download dagboek",
+                                        style="Primary.TButton",
+                                        command=self._trigger_diary_download,
+                                        state="disabled")
+        self._diary_dl_btn.pack(side="right", padx=(6, 0))
+        self._diary_progress_var = tk.StringVar(value="Laden…")
+        ttk.Label(bar, textvariable=self._diary_progress_var,
+                  style="Bar.TLabel").pack(side="right", padx=12)
 
         tk.Frame(self._diary_frame, height=1, bg=BORDER).pack(fill="x")
 
-        # Centred download card
-        body = ttk.Frame(self._diary_frame)
-        body.pack(fill="both", expand=True)
-        body.columnconfigure(0, weight=1)
-        body.rowconfigure(0, weight=1)
+        # ── Scrollable body ───────────────────────────────────────────────────
+        container = ttk.Frame(self._diary_frame)
+        container.pack(fill="both", expand=True)
 
-        inner = ttk.Frame(body, style="Card.TFrame", padding=40)
-        inner.grid(row=0, column=0)
+        self._diary_canvas = tk.Canvas(container, bg=BG, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(container, orient="vertical",
+                                  style="Thin.Vertical.TScrollbar",
+                                  command=self._diary_canvas.yview)
+        self._diary_canvas.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y", padx=(0, 2))
+        self._diary_canvas.pack(side="left", fill="both", expand=True)
 
-        first_name = self._child_name.split()[0]
-        ttk.Label(inner, text="Dagboek",                        style="Title.TLabel").pack(pady=(0, 4))
-        ttk.Label(inner, text=f"Download het dagboek van {first_name}", style="Sub.TLabel"  ).pack(pady=(0, 20))
+        self._diary_scroll = ttk.Frame(self._diary_canvas)
+        self._diary_win    = self._diary_canvas.create_window(
+            (0, 0), window=self._diary_scroll, anchor="nw")
 
-        self._diary_progress_var = tk.StringVar(value="")
-        ttk.Label(inner, textvariable=self._diary_progress_var,
-                  style="Bar.TLabel").pack(pady=(0, 10))
+        self._diary_scroll.bind("<Configure>", lambda e: self._diary_canvas.configure(
+            scrollregion=self._diary_canvas.bbox("all")))
+        self._diary_canvas.bind("<Configure>", lambda e: self._diary_canvas.itemconfig(
+            self._diary_win, width=e.width))
 
-        self._diary_dl_btn = ttk.Button(inner, text="Download dagboek",
-                                        style="Primary.TButton",
-                                        command=self._trigger_diary_download)
-        self._diary_dl_btn.pack(fill="x")
+        if platform.system() == "Darwin":
+            self._diary_canvas.bind_all(
+                "<MouseWheel>", lambda e: self._diary_canvas.yview_scroll(-e.delta, "units"))
+        else:
+            self._diary_canvas.bind_all(
+                "<MouseWheel>", lambda e: self._diary_canvas.yview_scroll(int(-e.delta / 120), "units"))
+            self._diary_canvas.bind_all(
+                "<Button-4>", lambda e: self._diary_canvas.yview_scroll(-1, "units"))
+            self._diary_canvas.bind_all(
+                "<Button-5>", lambda e: self._diary_canvas.yview_scroll(1,  "units"))
+
+        threading.Thread(target=self._fetch_diary_entries, daemon=True).start()
 
     def _back_from_diary(self):
         self._diary_frame.destroy()
@@ -749,9 +770,11 @@ class JaamoApp:
         )
         if not path:
             return
-        self._diary_dl_btn.config(state="disabled")
-        self._diary_progress_var.set("Dagboek ophalen…")
-        threading.Thread(target=self._fetch_diary, args=(path,), daemon=True).start()
+        html = self._build_diary_html(self._diary_entries)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(html)
+        messagebox.showinfo("Dagboek opgeslagen",
+                            f"{len(self._diary_entries)} berichten opgeslagen in:\n{path}")
 
     # ── Photo loading ─────────────────────────────────────────────────────────
 
@@ -1060,13 +1083,12 @@ class JaamoApp:
 
     # ── Diary ─────────────────────────────────────────────────────────────────
 
-    def _fetch_diary(self, path):
-        """Worker thread: fetch every story page and save as a single HTML file."""
+    def _fetch_diary_entries(self):
+        """Worker thread: fetch every story page and hand results to the main thread."""
         try:
             stories_url = f"{BASE_URL}/ouders/children/{self._child_id}/stories"
             soup = BeautifulSoup(self.session.get(stories_url, timeout=15).text, "html.parser")
 
-            # Collect unique story IDs in the order they appear on the page
             seen, story_ids = set(), []
             for a in soup.find_all("a", href=True):
                 href = a["href"]
@@ -1081,28 +1103,26 @@ class JaamoApp:
 
             for i, sid in enumerate(story_ids):
                 self.root.after(0, lambda n=i + 1, t=total:
-                                self._diary_progress_var.set(f"Dagboek: {n}/{t}…"))
+                                self._diary_progress_var.set(f"Laden: {n}/{t}…"))
                 try:
-                    r2   = self.session.get(
-                        f"{BASE_URL}/ouders/children/{self._child_id}/stories/{sid}",
-                        timeout=15)
-                    soup2 = BeautifulSoup(r2.text, "html.parser")
+                    soup2 = BeautifulSoup(
+                        self.session.get(
+                            f"{BASE_URL}/ouders/children/{self._child_id}/stories/{sid}",
+                            timeout=15).text,
+                        "html.parser")
 
-                    # Date from <h1> — the <i> icon has no text so get_text is clean
                     h1   = soup2.find("h1")
                     date = h1.get_text(" ", strip=True) if h1 else ""
 
-                    # Time from first div with both font_semi_bold and text_dark_grey classes
                     time_div = soup2.find(
                         "div", class_=lambda c: c and "font_semi_bold" in c and "text_dark_grey" in c)
                     time_str = time_div.get_text(strip=True) if time_div else ""
 
-                    # Text from div with font_small and text_dark_grey classes
                     text_div = soup2.find(
                         "div", class_=lambda c: c and "font_small" in c and "text_dark_grey" in c)
-                    paras = []
+                    paras: list[str] = []
                     if text_div:
-                        seen_p: set = set()
+                        seen_p: set[str] = set()
                         for p in text_div.find_all("p"):
                             t = p.get_text(strip=True)
                             if t and t not in seen_p:
@@ -1114,21 +1134,41 @@ class JaamoApp:
                 except Exception:
                     pass
 
-            html = self._build_diary_html(entries)
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(html)
-
-            def _done():
-                self._diary_progress_var.set(f"{len(entries)} berichten opgeslagen ✓")
-                self._diary_dl_btn.config(state="normal")
-                messagebox.showinfo("Dagboek opgeslagen",
-                                    f"{len(entries)} berichten opgeslagen in:\n{path}")
-            self.root.after(0, _done)
+            self.root.after(0, lambda: self._on_diary_loaded(entries))
 
         except Exception as e:
             msg = str(e)
             self.root.after(0, lambda: self._diary_progress_var.set(f"Fout: {msg}"))
-            self.root.after(0, lambda: self._diary_dl_btn.config(state="normal"))
+
+    def _on_diary_loaded(self, entries):
+        """Main thread: store entries and populate the scrollable diary view."""
+        self._diary_entries = entries
+        self._diary_progress_var.set(f"{len(entries)} berichten")
+        self._diary_dl_btn.config(state="normal")
+
+        for entry in entries:
+            card = ttk.Frame(self._diary_scroll, style="Card.TFrame", padding=(16, 12))
+            card.pack(fill="x", padx=16, pady=(8, 0))
+
+            # Date + time on one row
+            hdr = ttk.Frame(card, style="Card.TFrame")
+            hdr.pack(fill="x", pady=(0, 6))
+            ttk.Label(hdr, text=entry["date"],
+                      style="BarTitle.TLabel").pack(side="left")
+            if entry["time"]:
+                ttk.Label(hdr, text=entry["time"],
+                          style="Bar.TLabel").pack(side="right")
+
+            # Separator line under header
+            tk.Frame(card, height=1, bg=BORDER).pack(fill="x", pady=(0, 8))
+
+            # Text paragraphs
+            for para in entry["paras"]:
+                ttk.Label(card, text=para, wraplength=680,
+                          justify="left", style="Card.TLabel").pack(anchor="w", pady=(0, 4))
+
+        # Bottom padding so last card isn't flush against the edge
+        tk.Frame(self._diary_scroll, height=16, bg=BG).pack()
 
     def _build_diary_html(self, entries):
         """Build a self-contained HTML file from parsed diary entries."""
