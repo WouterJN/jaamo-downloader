@@ -25,7 +25,7 @@ from PIL import Image, ImageTk
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-__version__      = "1.3.0"
+__version__      = "1.3.1"
 
 BASE_URL         = "https://sksg.jaamo.nl"
 LOGIN_URL        = f"{BASE_URL}/login/ouder/sksg"
