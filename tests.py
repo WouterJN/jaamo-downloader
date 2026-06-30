@@ -50,6 +50,8 @@ from app import (
     _build_filename,
     _decimal_to_dms,
     _inject_exif_metadata,
+    _cache_size,
+    _clear_cache,
     _load_story_cache,
     _parse_nl_date,
     _save_story_cache,
@@ -1164,7 +1166,54 @@ class TestStoryCache(unittest.TestCase):
             self.assertEqual(_load_story_cache(path)["paras"][0], "🎉 Gefeliciteerd!")
 
 
-# ── 16. GUI callback integrity ────────────────────────────────────────────────
+# ── 16. Cache size and clearing ───────────────────────────────────────────────
+
+class TestCacheSizeAndClear(unittest.TestCase):
+
+    def test_size_of_empty_dirs_is_zero(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.assertEqual(_cache_size([d]), 0)
+
+    def test_size_sums_file_bytes_across_dirs(self):
+        with tempfile.TemporaryDirectory() as d1, tempfile.TemporaryDirectory() as d2:
+            with open(os.path.join(d1, "a.jpg"), "wb") as f: f.write(b"x" * 100)
+            with open(os.path.join(d2, "b.jpg"), "wb") as f: f.write(b"y" * 250)
+            self.assertEqual(_cache_size([d1, d2]), 350)
+
+    def test_size_recurses_into_subdirs(self):
+        with tempfile.TemporaryDirectory() as d:
+            sub = os.path.join(d, "child", "12497")
+            os.makedirs(sub)
+            with open(os.path.join(sub, "1.json"), "wb") as f: f.write(b"a" * 42)
+            self.assertEqual(_cache_size([d]), 42)
+
+    def test_size_handles_missing_dirs(self):
+        # os.walk silently yields nothing for non-existent paths
+        self.assertEqual(_cache_size(["/does/not/exist/123abc"]), 0)
+
+    def test_clear_removes_all_files(self):
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "f.jpg"), "wb") as f: f.write(b"z" * 999)
+            _clear_cache([d])
+            self.assertEqual(_cache_size([d]), 0)
+
+    def test_clear_recreates_empty_dir(self):
+        with tempfile.TemporaryDirectory() as parent:
+            target = os.path.join(parent, "cache")
+            os.makedirs(target)
+            with open(os.path.join(target, "f.jpg"), "wb") as f: f.write(b"z")
+            _clear_cache([target])
+            self.assertTrue(os.path.isdir(target))
+
+    def test_clear_missing_dir_does_not_raise(self):
+        with tempfile.TemporaryDirectory() as parent:
+            target = os.path.join(parent, "never_existed")
+            self.assertFalse(os.path.exists(target))
+            _clear_cache([target])
+            self.assertTrue(os.path.isdir(target))
+
+
+# ── 17. GUI callback integrity ────────────────────────────────────────────────
 
 class TestGuiCallbackRefs(unittest.TestCase):
     """Catch dead command= references without starting a Tk window.

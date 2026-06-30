@@ -12,6 +12,7 @@ import json
 import os
 import platform
 import re
+import shutil
 import threading
 import time
 import tkinter as tk
@@ -222,6 +223,32 @@ def _save_story_cache(path, entry):
         json.dump(entry, f, ensure_ascii=False)
 
 
+def _cache_size(dirs):
+    """Sum the byte size of every file under each directory in *dirs*."""
+    total = 0
+    for d in dirs:
+        for root, _, files in os.walk(d):
+            for f in files:
+                try:
+                    total += os.path.getsize(os.path.join(root, f))
+                except OSError:
+                    pass
+    return total
+
+
+def _clear_cache(dirs):
+    """Remove every directory in *dirs* and recreate it empty."""
+    for d in dirs:
+        try:
+            shutil.rmtree(d)
+        except FileNotFoundError:
+            pass
+        os.makedirs(d, exist_ok=True)
+
+
+_ALL_CACHE_DIRS = (THUMB_CACHE_DIR, DTHUMB_CACHE_DIR, PHOTO_CACHE_DIR, STORY_CACHE_DIR)
+
+
 # ── ttk styles ────────────────────────────────────────────────────────────────
 
 def _apply_styles():
@@ -303,7 +330,7 @@ class JaamoApp:
         self.root.configure(bg=BG)
         _apply_styles()
 
-        for _d in (THUMB_CACHE_DIR, DTHUMB_CACHE_DIR, PHOTO_CACHE_DIR, STORY_CACHE_DIR):
+        for _d in _ALL_CACHE_DIRS:
             os.makedirs(_d, exist_ok=True)
 
         # Persistent HTTP session keeps the auth cookie across all requests.
@@ -435,7 +462,10 @@ class JaamoApp:
 
         ttk.Button(card, text="GPS Location", style="Ghost.TButton",
                    command=self._show_location_dialog).grid(
-            row=9, column=0, columnspan=2, pady=(12, 0))
+            row=9, column=0, sticky="ew", pady=(12, 0), padx=(0, 4))
+        ttk.Button(card, text="Cache wissen", style="Ghost.TButton",
+                   command=self._clear_cache_dialog).grid(
+            row=9, column=1, sticky="ew", pady=(12, 0), padx=(4, 0))
 
         # Pre-fill from saved credentials if available
         creds = self._load_credentials()
@@ -701,6 +731,20 @@ class JaamoApp:
     # Bounding box of the Netherlands (mainland + islands)
     _NL_LAT_MIN, _NL_LAT_MAX = 50.75, 53.55
     _NL_LON_MIN, _NL_LON_MAX =  3.35,  7.25
+
+    def _clear_cache_dialog(self):
+        """Ask the user to confirm wiping every cache subdir, then do it."""
+        size_mb = _cache_size(_ALL_CACHE_DIRS) / (1024 * 1024)
+        if not messagebox.askyesno(
+            "Cache wissen",
+            f"Huidige cache: {size_mb:.1f} MB\n\n"
+            "Alle gecachede foto's, miniaturen en dagboek-berichten worden verwijderd. "
+            "Ze worden opnieuw gedownload bij de volgende keer dat je ze bekijkt.\n\n"
+            "Doorgaan?",
+        ):
+            return
+        _clear_cache(_ALL_CACHE_DIRS)
+        messagebox.showinfo("Cache gewist", f"{size_mb:.1f} MB vrijgemaakt.")
 
     def _show_location_dialog(self):
         """Modal dialog to view and update the GPS coordinates saved into each photo's EXIF."""
