@@ -63,8 +63,6 @@ BG       = "#F0F4F8"   # window background
 CARD     = "#FFFFFF"   # cards, toolbar, photo cells
 PRIMARY  = "#2B6CB0"   # primary buttons, selected cell border
 PRIMARY2 = "#2C5282"   # primary button hover
-SUCCESS  = "#276749"
-SUCCESS2 = "#22543D"
 MUTED    = "#718096"   # secondary text, hints
 BORDER   = "#CBD5E0"   # unselected cell border, separator line
 ERROR    = "#C53030"
@@ -189,13 +187,14 @@ def _build_filename(url, fallback_idx, date_str=None, first_name=None):
     name_prefix = f"{first_name}_" if first_name else ""
     return f"SKSG_{name_prefix}{date_prefix}{raw}"
 
-# ── ttk styles ────────────────────────────────────────────────────────────────
+# ── Cache helpers ─────────────────────────────────────────────────────────────
 
 def _thumb_cache_path(url, cache_dir):
-    """Return the file path where a thumbnail for `url` is (or would be) cached.
+    """Return the cache file path for *url* under *cache_dir*.
 
-    The query string is stripped so the same image maps to the same cache file
-    even when the S3 pre-signed URL is refreshed.
+    The query string is stripped so the same image hits the same cache file
+    after the S3 pre-signed URL has been rotated. Used for both thumbnails
+    (THUMB_CACHE_DIR, DTHUMB_CACHE_DIR) and full photos (PHOTO_CACHE_DIR).
     """
     stable = url.split("?")[0]
     key    = hashlib.md5(stable.encode()).hexdigest()
@@ -222,6 +221,8 @@ def _save_story_cache(path, entry):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(entry, f, ensure_ascii=False)
 
+
+# ── ttk styles ────────────────────────────────────────────────────────────────
 
 def _apply_styles():
     """Configure the clam theme with app-specific styles and a thin modern scrollbar.
@@ -258,7 +259,6 @@ def _apply_styles():
     # Buttons — loop to avoid repeating configure/map for each variant
     for name, bg, hover in [
         ("Primary.TButton", PRIMARY,   PRIMARY2),
-        ("Success.TButton", SUCCESS,   SUCCESS2),
         ("Warn.TButton",    "#B7791F", "#975A16"),
         ("Date.TButton",    PRIMARY,   PRIMARY2),
         ("Ghost.TButton",   BG,        BORDER),
@@ -330,6 +330,40 @@ class JaamoApp:
         self._gps_lon    = settings.get("gps_lon", SCHOOL_LON)
 
         self._setup_login_frame()
+
+    # ── Shared helpers ────────────────────────────────────────────────────────
+
+    def _fetch_or_cache(self, url, cache_dir, timeout):
+        """Return raw bytes for *url*, reading the on-disk cache when present.
+
+        Used by every image-fetching path (gallery thumbs, diary thumbs, full
+        photo downloads). Strips the query string from *url* to derive a stable
+        cache key, so S3 pre-signed URLs hit the same file after rotation.
+        """
+        path = _thumb_cache_path(url, cache_dir)
+        if os.path.exists(path):
+            with open(path, "rb") as f:
+                return f.read()
+        r = self.session.get(url, timeout=timeout)
+        r.raise_for_status()
+        with open(path, "wb") as f:
+            f.write(r.content)
+        return r.content
+
+    def _bind_mousewheel(self, canvas):
+        """Bind cross-platform mouse-wheel scrolling to *canvas*.
+
+        macOS reports event.delta as small integers (3–6); Windows/Linux send
+        multiples of 120. Linux also uses Button-4/5 for two-finger scroll.
+        """
+        if platform.system() == "Darwin":
+            canvas.bind_all("<MouseWheel>",
+                            lambda e: canvas.yview_scroll(-e.delta, "units"))
+        else:
+            canvas.bind_all("<MouseWheel>",
+                            lambda e: canvas.yview_scroll(int(-e.delta / 120), "units"))
+            canvas.bind_all("<Button-4>", lambda e: canvas.yview_scroll(-1, "units"))
+            canvas.bind_all("<Button-5>", lambda e: canvas.yview_scroll(1,  "units"))
 
     # ── Settings ──────────────────────────────────────────────────────────────
 
@@ -653,14 +687,7 @@ class JaamoApp:
         self.canvas.bind("<Configure>", lambda e: self.canvas.itemconfig(
             self._canvas_win, width=e.width))
 
-        # ── Mouse wheel ───────────────────────────────────────────────────────
-        # macOS reports delta as small integers (3–6); Windows/Linux use multiples of 120.
-        if platform.system() == "Darwin":
-            self.canvas.bind_all("<MouseWheel>", lambda e: self.canvas.yview_scroll(-e.delta, "units"))
-        else:
-            self.canvas.bind_all("<MouseWheel>", lambda e: self.canvas.yview_scroll(int(-e.delta / 120), "units"))
-            self.canvas.bind_all("<Button-4>",   lambda e: self.canvas.yview_scroll(-1, "units"))  # Linux scroll up
-            self.canvas.bind_all("<Button-5>",   lambda e: self.canvas.yview_scroll(1,  "units"))  # Linux scroll down
+        self._bind_mousewheel(self.canvas)
 
     # Bounding box of the Netherlands (mainland + islands)
     _NL_LAT_MIN, _NL_LAT_MAX = 50.75, 53.55
@@ -796,16 +823,7 @@ class JaamoApp:
         self._diary_canvas.bind("<Configure>", lambda e: self._diary_canvas.itemconfig(
             self._diary_win, width=e.width))
 
-        if platform.system() == "Darwin":
-            self._diary_canvas.bind_all(
-                "<MouseWheel>", lambda e: self._diary_canvas.yview_scroll(-e.delta, "units"))
-        else:
-            self._diary_canvas.bind_all(
-                "<MouseWheel>", lambda e: self._diary_canvas.yview_scroll(int(-e.delta / 120), "units"))
-            self._diary_canvas.bind_all(
-                "<Button-4>", lambda e: self._diary_canvas.yview_scroll(-1, "units"))
-            self._diary_canvas.bind_all(
-                "<Button-5>", lambda e: self._diary_canvas.yview_scroll(1,  "units"))
+        self._bind_mousewheel(self._diary_canvas)
 
         threading.Thread(target=self._fetch_diary_entries, daemon=True).start()
 
@@ -966,15 +984,8 @@ class JaamoApp:
     def _load_thumb(self, thumb_url, full_url, group, slot):
         """Download (or load from cache) one thumbnail; schedule UI placement."""
         try:
-            cache = _thumb_cache_path(thumb_url, THUMB_CACHE_DIR)
-            if os.path.exists(cache):
-                data = open(cache, "rb").read()
-            else:
-                r    = self.session.get(thumb_url, timeout=20)
-                r.raise_for_status()
-                data = r.content
-                open(cache, "wb").write(data)
-            img = Image.open(io.BytesIO(data))
+            data = self._fetch_or_cache(thumb_url, THUMB_CACHE_DIR, 20)
+            img  = Image.open(io.BytesIO(data))
             img.thumbnail(THUMB_SIZE, Image.LANCZOS)
             photo = ImageTk.PhotoImage(img)
             self.root.after(0, lambda p=photo, u=full_url, g=group, s=slot:
@@ -1118,17 +1129,10 @@ class JaamoApp:
         for i, (entry, date_str) in enumerate(pairs):
             url = entry["full"]
             try:
-                cache = _thumb_cache_path(url, PHOTO_CACHE_DIR)
-                if os.path.exists(cache):
-                    raw = open(cache, "rb").read()
-                else:
-                    r = self.session.get(url, timeout=30)
-                    r.raise_for_status()
-                    raw = r.content
-                    open(cache, "wb").write(raw)
+                raw  = self._fetch_or_cache(url, PHOTO_CACHE_DIR, 30)
                 dest = _unique_path(folder, _build_filename(url, i, date_str, first_name))
                 data = _apply_metadata(raw, date_str, entry.get("caption"),
-                                      self._gps_lat, self._gps_lon)
+                                       self._gps_lat, self._gps_lon)
                 with open(dest, "wb") as f:
                     f.write(data)
                 _set_file_time(dest, date_str)
@@ -1281,14 +1285,7 @@ class JaamoApp:
     def _load_diary_thumb(self, url, label):
         """Worker thread: fetch (or load from cache) one diary thumbnail."""
         try:
-            cache = _thumb_cache_path(url, DTHUMB_CACHE_DIR)
-            if os.path.exists(cache):
-                data = open(cache, "rb").read()
-            else:
-                r    = self.session.get(url, timeout=15)
-                r.raise_for_status()
-                data = r.content
-                open(cache, "wb").write(data)
+            data    = self._fetch_or_cache(url, DTHUMB_CACHE_DIR, 15)
             pil_img = Image.open(io.BytesIO(data))
             pil_img.thumbnail(DIARY_THUMB_SIZE, Image.LANCZOS)
             def _place(pil=pil_img):

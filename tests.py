@@ -17,9 +17,13 @@ Coverage:
   - Diary stories listing  (replicates _fetch_diary_entries list logic)
   - Diary story page       (replicates _fetch_diary_entries per-page logic)
   - Diary HTML building    (replicates _build_diary_html logic)
+  - Thumbnail cache key    (_thumb_cache_path)
+  - Story cache I/O        (_story_cache_path, _load/_save_story_cache)
+  - GUI callback integrity (parses app.py for dead command= references)
 
 Note: JaamoApp itself is not instantiated here — it requires a live Tk display.
-All tests target module-level helpers and replicated parsing logic.
+All tests target module-level helpers and replicated parsing logic, plus a
+static source-scan test for widget command= callbacks.
 """
 
 import datetime
