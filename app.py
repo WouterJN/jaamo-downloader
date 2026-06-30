@@ -6,6 +6,7 @@ Works with any daycare using the Jaamo platform.
 """
 
 import datetime
+import hashlib
 import io
 import json
 import os
@@ -36,8 +37,13 @@ SCHOOL_LON       =   6.581978296365286
 THUMB_SIZE       = (180, 180)
 DIARY_THUMB_SIZE = (120, 120)
 COLS             = 4                                      # photos per row in gallery
-CREDENTIALS_FILE = os.path.expanduser("~/.jaamo_credentials.json")
-SETTINGS_FILE    = os.path.expanduser("~/.jaamo_settings.json")
+CREDENTIALS_FILE  = os.path.expanduser("~/.jaamo_credentials.json")
+SETTINGS_FILE     = os.path.expanduser("~/.jaamo_settings.json")
+
+_CACHE_ROOT       = os.path.expanduser("~/.jaamo_cache")
+THUMB_CACHE_DIR   = os.path.join(_CACHE_ROOT, "thumbs")
+DTHUMB_CACHE_DIR  = os.path.join(_CACHE_ROOT, "diary_thumbs")
+STORY_CACHE_DIR   = os.path.join(_CACHE_ROOT, "stories")
 
 # Dutch month abbreviations as they appear on the Jaamo photos page.
 _NL_MONTHS = {
@@ -184,6 +190,38 @@ def _build_filename(url, fallback_idx, date_str=None, first_name=None):
 
 # ── ttk styles ────────────────────────────────────────────────────────────────
 
+def _thumb_cache_path(url, cache_dir):
+    """Return the file path where a thumbnail for `url` is (or would be) cached.
+
+    The query string is stripped so the same image maps to the same cache file
+    even when the S3 pre-signed URL is refreshed.
+    """
+    stable = url.split("?")[0]
+    key    = hashlib.md5(stable.encode()).hexdigest()
+    return os.path.join(cache_dir, key + ".jpg")
+
+
+def _story_cache_path(child_id, story_id):
+    """Return the file path for a cached story entry."""
+    return os.path.join(STORY_CACHE_DIR, str(child_id), f"{story_id}.json")
+
+
+def _load_story_cache(path):
+    """Load a cached story dict from *path*; return None if absent or corrupt."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _save_story_cache(path, entry):
+    """Persist a parsed story dict to *path* as JSON, creating parent dirs."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(entry, f, ensure_ascii=False)
+
+
 def _apply_styles():
     """Configure the clam theme with app-specific styles and a thin modern scrollbar.
 
@@ -263,6 +301,9 @@ class JaamoApp:
         self.root.minsize(750, 520)
         self.root.configure(bg=BG)
         _apply_styles()
+
+        for _d in (THUMB_CACHE_DIR, DTHUMB_CACHE_DIR, STORY_CACHE_DIR):
+            os.makedirs(_d, exist_ok=True)
 
         # Persistent HTTP session keeps the auth cookie across all requests.
         self.session = requests.Session()
@@ -922,11 +963,17 @@ class JaamoApp:
         self.sel_all_btn.config(state="normal" if total > 0 else "disabled")
 
     def _load_thumb(self, thumb_url, full_url, group, slot):
-        """Download and resize one thumbnail; schedule UI placement on the main thread."""
+        """Download (or load from cache) one thumbnail; schedule UI placement."""
         try:
-            r   = self.session.get(thumb_url, timeout=20)
-            r.raise_for_status()
-            img = Image.open(io.BytesIO(r.content))
+            cache = _thumb_cache_path(thumb_url, THUMB_CACHE_DIR)
+            if os.path.exists(cache):
+                data = open(cache, "rb").read()
+            else:
+                r    = self.session.get(thumb_url, timeout=20)
+                r.raise_for_status()
+                data = r.content
+                open(cache, "wb").write(data)
+            img = Image.open(io.BytesIO(data))
             img.thumbnail(THUMB_SIZE, Image.LANCZOS)
             photo = ImageTk.PhotoImage(img)
             self.root.after(0, lambda p=photo, u=full_url, g=group, s=slot:
@@ -1113,6 +1160,13 @@ class JaamoApp:
             self._diary_total = total
 
             for i, sid in enumerate(story_ids):
+                cache_path = _story_cache_path(self._child_id, sid)
+                cached = _load_story_cache(cache_path)
+                if cached is not None:
+                    self.root.after(0, lambda e=cached, n=i + 1, t=total:
+                                    self._add_diary_card(e, n, t))
+                    continue
+
                 self.root.after(0, lambda n=i + 1, t=total:
                                 self._diary_progress_var.set(f"Laden: {n}/{t}…"))
                 try:
@@ -1153,6 +1207,7 @@ class JaamoApp:
                     if date or paras or images:
                         entry = {"date": date, "time": time_str,
                                  "paras": paras, "images": images}
+                        _save_story_cache(cache_path, entry)
                         self.root.after(0, lambda e=entry, n=i + 1, t=total:
                                         self._add_diary_card(e, n, t))
                 except Exception:
@@ -1217,11 +1272,17 @@ class JaamoApp:
         tk.Frame(self._diary_scroll, height=16, bg=BG).pack()
 
     def _load_diary_thumb(self, url, label):
-        """Worker thread: fetch one diary thumbnail and place it on the main thread."""
+        """Worker thread: fetch (or load from cache) one diary thumbnail."""
         try:
-            r = self.session.get(url, timeout=15)
-            r.raise_for_status()
-            pil_img = Image.open(io.BytesIO(r.content))
+            cache = _thumb_cache_path(url, DTHUMB_CACHE_DIR)
+            if os.path.exists(cache):
+                data = open(cache, "rb").read()
+            else:
+                r    = self.session.get(url, timeout=15)
+                r.raise_for_status()
+                data = r.content
+                open(cache, "wb").write(data)
+            pil_img = Image.open(io.BytesIO(data))
             pil_img.thumbnail(DIARY_THUMB_SIZE, Image.LANCZOS)
             def _place(pil=pil_img):
                 photo = ImageTk.PhotoImage(pil)

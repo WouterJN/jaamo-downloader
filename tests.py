@@ -35,15 +35,22 @@ from bs4 import BeautifulSoup
 from PIL import Image
 
 from app import (
+    DTHUMB_CACHE_DIR,
     SCHOOL_LAT,
     SCHOOL_LON,
+    STORY_CACHE_DIR,
+    THUMB_CACHE_DIR,
     JaamoApp,
     _apply_metadata,
     _build_filename,
     _decimal_to_dms,
     _inject_exif_metadata,
+    _load_story_cache,
     _parse_nl_date,
+    _save_story_cache,
     _set_file_time,
+    _story_cache_path,
+    _thumb_cache_path,
     _unique_path,
 )
 
@@ -1056,7 +1063,97 @@ class TestBuildDiaryHtml(unittest.TestCase):
         self.assertIn("0 berichten", html)
 
 
-# ── 14. GUI callback integrity ────────────────────────────────────────────────
+# ── 14. Thumbnail cache path ─────────────────────────────────────────────────
+
+class TestThumbCachePath(unittest.TestCase):
+
+    URL  = "https://s3.example.com/bucket/photo.jpg?X-Amz-Expires=600&sig=abc"
+    URL2 = "https://s3.example.com/bucket/other.jpg?X-Amz-Expires=600&sig=xyz"
+
+    def test_deterministic(self):
+        self.assertEqual(
+            _thumb_cache_path(self.URL, THUMB_CACHE_DIR),
+            _thumb_cache_path(self.URL, THUMB_CACHE_DIR),
+        )
+
+    def test_query_string_ignored(self):
+        url_different_sig = self.URL.replace("sig=abc", "sig=999")
+        self.assertEqual(
+            _thumb_cache_path(self.URL, THUMB_CACHE_DIR),
+            _thumb_cache_path(url_different_sig, THUMB_CACHE_DIR),
+        )
+
+    def test_different_images_differ(self):
+        self.assertNotEqual(
+            _thumb_cache_path(self.URL,  THUMB_CACHE_DIR),
+            _thumb_cache_path(self.URL2, THUMB_CACHE_DIR),
+        )
+
+    def test_returns_jpg_extension(self):
+        self.assertTrue(_thumb_cache_path(self.URL, THUMB_CACHE_DIR).endswith(".jpg"))
+
+    def test_path_in_given_dir(self):
+        path = _thumb_cache_path(self.URL, THUMB_CACHE_DIR)
+        self.assertEqual(os.path.dirname(path), THUMB_CACHE_DIR)
+
+    def test_diary_cache_dir_differs_from_gallery(self):
+        self.assertNotEqual(
+            _thumb_cache_path(self.URL, THUMB_CACHE_DIR),
+            _thumb_cache_path(self.URL, DTHUMB_CACHE_DIR),
+        )
+
+
+# ── 15. Story cache I/O ───────────────────────────────────────────────────────
+
+class TestStoryCache(unittest.TestCase):
+
+    ENTRY = {
+        "date": "20 mei 2026", "time": "08:10",
+        "paras": ["Beste ouder/verzorger", "Vandaag gespeeld."],
+        "images": [{"thumb": "https://s3.example.com/t.jpg",
+                    "full":  "https://s3.example.com/f.jpg"}],
+    }
+
+    def test_save_and_load_roundtrip(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "child", "42.json")
+            _save_story_cache(path, self.ENTRY)
+            loaded = _load_story_cache(path)
+            self.assertEqual(loaded, self.ENTRY)
+
+    def test_missing_file_returns_none(self):
+        self.assertIsNone(_load_story_cache("/nonexistent/path/99.json"))
+
+    def test_corrupt_file_returns_none(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            f.write("not valid json {{")
+            name = f.name
+        try:
+            self.assertIsNone(_load_story_cache(name))
+        finally:
+            os.unlink(name)
+
+    def test_save_creates_parent_directory(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "nested", "dir", "1.json")
+            _save_story_cache(path, self.ENTRY)
+            self.assertTrue(os.path.exists(path))
+
+    def test_story_cache_path_contains_child_and_story_id(self):
+        path = _story_cache_path(12497, "9876")
+        self.assertIn("12497", path)
+        self.assertIn("9876",  path)
+        self.assertTrue(path.startswith(STORY_CACHE_DIR))
+
+    def test_unicode_preserved(self):
+        entry = {"date": "1 mei 2026", "time": "", "paras": ["🎉 Gefeliciteerd!"], "images": []}
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "u.json")
+            _save_story_cache(path, entry)
+            self.assertEqual(_load_story_cache(path)["paras"][0], "🎉 Gefeliciteerd!")
+
+
+# ── 16. GUI callback integrity ────────────────────────────────────────────────
 
 class TestGuiCallbackRefs(unittest.TestCase):
     """Catch dead command= references without starting a Tk window.
