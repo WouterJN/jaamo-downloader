@@ -582,10 +582,6 @@ class JaamoApp:
         ttk.Button(bar, text="Vernieuwen", style="Primary.TButton",
                    command=self._load_photos).pack(side="right", padx=(6, 0))
 
-        self.diary_btn = ttk.Button(bar, text="Dagboek", style="Ghost.TButton",
-                                    command=self._download_diary)
-        self.diary_btn.pack(side="right", padx=(6, 0))
-
         self.progress_var  = tk.StringVar(value="Foto's laden…")
         self.selection_var = tk.StringVar(value="")
         ttk.Label(bar, textvariable=self.selection_var, style="Bar.TLabel").pack(side="right", padx=(12, 0))
