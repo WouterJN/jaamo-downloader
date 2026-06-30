@@ -11,19 +11,20 @@ Coverage:
   - Collision-safe paths   (_unique_path)
   - File timestamps        (_set_file_time)
   - EXIF injection         (_inject_exif_metadata, _apply_metadata)
-  - Gallery HTML parsing   (replicates _fetch_photos logic)
-  - Accounts HTML parsing  (replicates _fetch_children logic)
+  - Gallery HTML parsing   (_parse_gallery_html, used by _fetch_photos)
+  - Accounts HTML parsing  (_parse_accounts_html, used by _fetch_children)
   - Credential file I/O    (save / load / clear / permissions)
-  - Diary stories listing  (replicates _fetch_diary_entries list logic)
-  - Diary story page       (replicates _fetch_diary_entries per-page logic)
-  - Diary HTML building    (replicates _build_diary_html logic)
+  - Diary stories listing  (_parse_stories_html, used by _fetch_diary_entries)
+  - Diary story page       (_parse_story_page, used by _fetch_diary_entries)
+  - Diary HTML building    (_build_diary_html, used by _trigger_diary_download)
   - Thumbnail cache key    (_thumb_cache_path)
   - Story cache I/O        (_story_cache_path, _load/_save_story_cache)
   - GUI callback integrity (parses app.py for dead command= references)
 
 Note: JaamoApp itself is not instantiated here — it requires a live Tk display.
-All tests target module-level helpers and replicated parsing logic, plus a
-static source-scan test for widget command= callbacks.
+All HTML-parsing and HTML-building tests import the real module-level
+functions from app.py (not a copy), so they exercise the same code path the
+app uses at runtime.
 """
 
 import datetime
@@ -47,13 +48,18 @@ from app import (
     THUMB_CACHE_DIR,
     JaamoApp,
     _apply_metadata,
+    _build_diary_html,
     _build_filename,
     _decimal_to_dms,
     _inject_exif_metadata,
     _cache_size,
     _clear_cache,
     _load_story_cache,
+    _parse_accounts_html,
+    _parse_gallery_html,
     _parse_nl_date,
+    _parse_stories_html,
+    _parse_story_page,
     _save_story_cache,
     _set_file_time,
     _story_cache_path,
@@ -69,153 +75,6 @@ def _make_jpeg(width=10, height=10, color=(200, 100, 50)):
     buf = io.BytesIO()
     img.save(buf, format="JPEG")
     return buf.getvalue()
-
-
-def _parse_gallery_html(html):
-    """
-    Replicate the parsing logic from JaamoApp._fetch_photos so we can unit-test
-    it without needing a live Tk window or HTTP session.
-    """
-    soup    = BeautifulSoup(html, "html.parser")
-    gallery = soup.find("div", class_="image_gallery")
-    if not gallery:
-        return []
-
-    groups          = []
-    current_date    = "Onbekende datum"
-    current_entries = []
-
-    for node in gallery.children:
-        if not hasattr(node, "get"):
-            continue
-        classes = node.get("class", [])
-
-        if "col-12" in classes and "font_semi_bold" in classes:
-            if current_entries:
-                groups.append({"date": current_date, "entries": current_entries})
-            current_date    = node.get_text(strip=True)
-            current_entries = []
-
-        elif "image_canvas" in classes:
-            div  = node.find("div", class_="image_container")
-            if not div:
-                continue
-            full = div.get("data-src", "")
-            if not full or not full.startswith("http"):
-                continue
-            img_tag = div.find("img", attrs={"data-original": True})
-            thumb   = img_tag["data-original"] if img_tag else full
-            caption = ""
-            sub_id  = div.get("data-sub-html", "").lstrip("#")
-            if sub_id:
-                cap_div = node.find("div", {"id": sub_id})
-                if cap_div:
-                    caption = cap_div.get_text(separator="\n", strip=True)
-            current_entries.append({"thumb": thumb, "full": full, "caption": caption})
-
-    if current_entries:
-        groups.append({"date": current_date, "entries": current_entries})
-    return groups
-
-
-def _parse_stories_html(html, child_id):
-    """
-    Replicate the story-ID extraction from JaamoApp._fetch_diary_entries.
-    Returns a list of unique numeric story ID strings in page order.
-    """
-    soup = BeautifulSoup(html, "html.parser")
-    seen, story_ids = set(), []
-    for a in soup.find_all("a", href=True):
-        href = a["href"]
-        if f"/children/{child_id}/stories/" in href:
-            sid = href.rstrip("/").rsplit("/", 1)[-1]
-            if sid.isdigit() and sid not in seen:
-                seen.add(sid)
-                story_ids.append(sid)
-    return story_ids
-
-
-def _parse_story_page(html):
-    """
-    Replicate the per-story parsing from JaamoApp._fetch_diary_entries.
-    Returns {"date": str, "time": str, "paras": [str, ...]}.
-    """
-    soup = BeautifulSoup(html, "html.parser")
-    h1   = soup.find("h1")
-    date = h1.get_text(" ", strip=True) if h1 else ""
-
-    time_div = soup.find(
-        "div", class_=lambda c: c and "font_semi_bold" in c and "text_dark_grey" in c)
-    time_str = time_div.get_text(strip=True) if time_div else ""
-
-    text_div = soup.find(
-        "div", class_=lambda c: c and "font_small" in c and "text_dark_grey" in c)
-    paras: list = []
-    if text_div:
-        seen_p: set = set()
-        for p in text_div.find_all("p"):
-            t = p.get_text(strip=True)
-            if t and t not in seen_p:
-                seen_p.add(t)
-                paras.append(t)
-
-    images: list = []
-    for img_div in soup.find_all("div", class_="image_container"):
-        full = img_div.get("data-src", "")
-        if not full or not full.startswith("http"):
-            continue
-        img_tag = img_div.find("img", attrs={"data-original": True})
-        thumb   = img_tag["data-original"] if img_tag else full
-        if thumb and thumb.startswith("http"):
-            images.append({"thumb": thumb, "full": full})
-
-    return {"date": date, "time": time_str, "paras": paras, "images": images}
-
-
-def _build_diary_html(entries, first_name, today="01-01-2026"):
-    """
-    Replicate JaamoApp._build_diary_html for testing without a Tk instance.
-    """
-    cards = []
-    for e in entries:
-        time_html  = f'<div class="time">{e["time"]}</div>' if e["time"] else ""
-        paras_html = "".join(f"<p>{p}</p>" for p in e["paras"])
-        cards.append(
-            f'<div class="entry">'
-            f'<div class="date">{e["date"]}</div>'
-            f'{time_html}'
-            f'<div class="text">{paras_html}</div>'
-            f'</div>'
-        )
-    return (
-        f'<!DOCTYPE html>\n<html lang="nl">\n<head>\n'
-        f'  <meta charset="UTF-8"/>\n'
-        f'  <title>Dagboek van {first_name}</title>\n'
-        f'</head>\n<body>\n'
-        f'  <h1>Dagboek van {first_name}</h1>\n'
-        f'  <p class="sub">Gedownload op {today} &middot; {len(entries)} berichten</p>\n'
-        + "".join(cards) +
-        f'\n</body>\n</html>'
-    )
-
-
-def _parse_accounts_html(html):
-    """
-    Replicate the child-parsing logic from JaamoApp._fetch_children so we can
-    unit-test it without a Tk window or HTTP session.
-    """
-    soup     = BeautifulSoup(html, "html.parser")
-    children = []
-    seen     = set()
-    for a in soup.find_all("a", href=re.compile(r"^/ouders/children/\d+$")):
-        child_id = a["href"].split("/")[-1]
-        if child_id in seen:
-            continue
-        seen.add(child_id)
-        img_tag = a.find("img", class_="thumbnail")
-        name    = img_tag.get("alt", f"Kind {child_id}") if img_tag else f"Kind {child_id}"
-        children.append({"id": child_id, "name": name})
-    return children
 
 
 # ── Sample HTML fixtures ──────────────────────────────────────────────────────

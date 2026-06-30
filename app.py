@@ -249,6 +249,196 @@ def _clear_cache(dirs):
 _ALL_CACHE_DIRS = (THUMB_CACHE_DIR, DTHUMB_CACHE_DIR, PHOTO_CACHE_DIR, STORY_CACHE_DIR)
 
 
+# ── HTML parsing helpers ──────────────────────────────────────────────────────
+
+def _parse_gallery_html(html):
+    """
+    Parse the photos page: date headers and photo entries are siblings inside
+    <div class="image_gallery">. Returns date groups, newest first.
+    """
+    soup    = BeautifulSoup(html, "html.parser")
+    gallery = soup.find("div", class_="image_gallery")
+    if not gallery:
+        return []
+
+    groups          = []
+    current_date    = "Onbekende datum"
+    current_entries = []
+
+    for node in gallery.children:
+        # BeautifulSoup yields NavigableString nodes (whitespace) alongside Tag
+        # nodes — skip anything without .get() (i.e. non-Tag nodes).
+        if not hasattr(node, "get"):
+            continue
+
+        classes = node.get("class", [])
+
+        if "col-12" in classes and "font_semi_bold" in classes:
+            # Date header — flush the previous group and start a new one
+            if current_entries:
+                groups.append({"date": current_date, "entries": current_entries})
+            current_date    = node.get_text(strip=True)
+            current_entries = []
+
+        elif "image_canvas" in classes:
+            div = node.find("div", class_="image_container")
+            if not div:
+                continue
+            full = div.get("data-src", "")
+            if not full or not full.startswith("http"):
+                continue
+
+            img_tag = div.find("img", attrs={"data-original": True})
+            thumb   = img_tag["data-original"] if img_tag else full
+
+            # Caption lives in a sibling div whose id is referenced by data-sub-html
+            caption = ""
+            sub_id  = div.get("data-sub-html", "").lstrip("#")
+            if sub_id:
+                cap_div = node.find("div", {"id": sub_id})
+                if cap_div:
+                    caption = cap_div.get_text(separator="\n", strip=True)
+
+            current_entries.append({"thumb": thumb, "full": full, "caption": caption})
+
+    if current_entries:
+        groups.append({"date": current_date, "entries": current_entries})
+
+    # Sort newest first; unparseable dates sink to the bottom.
+    _MIN_DATE = datetime.date.min
+    groups.sort(
+        key=lambda g: _parse_nl_date(g["date"]) or _MIN_DATE,
+        reverse=True,
+    )
+    return groups
+
+
+def _parse_accounts_html(html):
+    """
+    Parse /ouders/accounts for <a href="/ouders/children/NNN"> links.
+    Returns [{"id": ..., "name": ..., "thumb_src": ...}, ...], deduplicated by
+    child id. "thumb_src" is the raw (possibly relative) img src, or None.
+    """
+    soup     = BeautifulSoup(html, "html.parser")
+    children = []
+    seen     = set()
+    for a in soup.find_all("a", href=re.compile(r"^/ouders/children/\d+$")):
+        child_id = a["href"].split("/")[-1]
+        if child_id in seen:
+            continue
+        seen.add(child_id)
+
+        img_tag   = a.find("img", class_="thumbnail")
+        name      = img_tag.get("alt", f"Kind {child_id}") if img_tag else f"Kind {child_id}"
+        thumb_src = img_tag.get("src") if img_tag else None
+
+        children.append({"id": child_id, "name": name, "thumb_src": thumb_src})
+    return children
+
+
+def _parse_stories_html(html, child_id):
+    """
+    Parse the stories list page for a given child. Returns unique numeric
+    story ID strings in page order.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    seen, story_ids = set(), []
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
+        if f"/children/{child_id}/stories/" in href:
+            sid = href.rstrip("/").rsplit("/", 1)[-1]
+            if sid.isdigit() and sid not in seen:
+                seen.add(sid)
+                story_ids.append(sid)
+    return story_ids
+
+
+def _parse_story_page(html):
+    """
+    Parse one diary story page. Returns
+    {"date": str, "time": str, "paras": [str, ...], "images": [{"thumb", "full"}, ...]}.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    h1   = soup.find("h1")
+    date = h1.get_text(" ", strip=True) if h1 else ""
+
+    time_div = soup.find(
+        "div", class_=lambda c: c and "font_semi_bold" in c and "text_dark_grey" in c)
+    time_str = time_div.get_text(strip=True) if time_div else ""
+
+    text_div = soup.find(
+        "div", class_=lambda c: c and "font_small" in c and "text_dark_grey" in c)
+    paras: list = []
+    if text_div:
+        seen_p: set = set()
+        for p in text_div.find_all("p"):
+            t = p.get_text(strip=True)
+            if t and t not in seen_p:
+                seen_p.add(t)
+                paras.append(t)
+
+    images: list = []
+    for img_div in soup.find_all("div", class_="image_container"):
+        full = img_div.get("data-src", "")
+        if not full or not full.startswith("http"):
+            continue
+        img_tag = img_div.find("img", attrs={"data-original": True})
+        thumb   = img_tag["data-original"] if img_tag else full
+        if thumb and thumb.startswith("http"):
+            images.append({"thumb": thumb, "full": full})
+
+    return {"date": date, "time": time_str, "paras": paras, "images": images}
+
+
+def _build_diary_html(entries, first_name, today=None):
+    """Build a self-contained HTML file from parsed diary entries."""
+    if today is None:
+        today = datetime.date.today().strftime("%d-%m-%Y")
+
+    cards = []
+    for e in entries:
+        time_html  = (f'<div class="time">{e["time"]}</div>') if e["time"] else ""
+        paras_html = "".join(f"<p>{p}</p>" for p in e["paras"])
+        cards.append(
+            f'<div class="entry">'
+            f'<div class="date">{e["date"]}</div>'
+            f'{time_html}'
+            f'<div class="text">{paras_html}</div>'
+            f'</div>'
+        )
+
+    return f"""<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8"/>
+  <title>Dagboek van {first_name}</title>
+  <style>
+    *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    body {{
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #F0F4F8; color: #1A202C;
+      max-width: 760px; margin: 0 auto; padding: 32px 16px;
+    }}
+    h1   {{ color: #2B6CB0; font-size: 1.8rem; margin-bottom: 4px; }}
+    .sub {{ color: #718096; font-size: .88rem; margin-bottom: 36px; }}
+    .entry {{
+      background: #fff; border: 1px solid #CBD5E0; border-radius: 10px;
+      padding: 18px 22px; margin-bottom: 14px;
+    }}
+    .date {{ font-weight: 700; color: #2B6CB0; font-size: 1rem; margin-bottom: 2px; }}
+    .time {{ color: #718096; font-size: .82rem; margin-bottom: 10px; }}
+    .text p {{ line-height: 1.65; margin-bottom: 8px; }}
+    .text p:last-child {{ margin-bottom: 0; }}
+  </style>
+</head>
+<body>
+  <h1>Dagboek van {first_name}</h1>
+  <p class="sub">Gedownload op {today} &middot; {len(entries)} berichten</p>
+  {"".join(cards)}
+</body>
+</html>"""
+
+
 # ── ttk styles ────────────────────────────────────────────────────────────────
 
 def _apply_styles():
@@ -554,24 +744,14 @@ class JaamoApp:
         ImageTk on the main thread in _show_child_selector).
         """
         try:
-            r    = self.session.get(ACCOUNTS_URL, timeout=15)
+            r = self.session.get(ACCOUNTS_URL, timeout=15)
             r.raise_for_status()
-            soup = BeautifulSoup(r.text, "html.parser")
+            children = _parse_accounts_html(r.text)
 
-            children = []
-            seen     = set()
-            for a in soup.find_all("a", href=re.compile(r"^/ouders/children/\d+$")):
-                child_id = a["href"].split("/")[-1]
-                if child_id in seen:
-                    continue
-                seen.add(child_id)
-
-                img_tag = a.find("img", class_="thumbnail")
-                name    = img_tag.get("alt", f"Kind {child_id}") if img_tag else f"Kind {child_id}"
-
+            for child in children:
                 pil_img = None
-                if img_tag and img_tag.get("src"):
-                    src = img_tag["src"]
+                src     = child.pop("thumb_src")
+                if src:
                     if not src.startswith("http"):
                         src = BASE_URL + src
                     try:
@@ -580,8 +760,7 @@ class JaamoApp:
                         pil_img.thumbnail((80, 80), Image.LANCZOS)
                     except Exception:
                         pass
-
-                children.append({"id": child_id, "name": name, "pil_img": pil_img})
+                child["pil_img"] = pil_img
 
             self.root.after(0, lambda: self._on_children_loaded(children))
 
@@ -894,7 +1073,7 @@ class JaamoApp:
         )
         if not path:
             return
-        html = self._build_diary_html(self._diary_entries)
+        html = _build_diary_html(self._diary_entries, first_name)
         with open(path, "w", encoding="utf-8") as f:
             f.write(html)
         messagebox.showinfo("Dagboek opgeslagen",
@@ -920,76 +1099,11 @@ class JaamoApp:
         threading.Thread(target=self._fetch_photos, daemon=True).start()
 
     def _fetch_photos(self):
-        """
-        Fetch the photos page and parse date groups + photo entries.
-
-        HTML structure inside <div class="image_gallery">:
-          <div class="col-12 font_semi_bold">29 jun 2026</div>   ← date header
-          <div class="image_canvas …">…</div>                    ← photo entry
-          …
-
-        The two element types are siblings, so we walk them in order and track
-        the current date group.
-        """
+        """Fetch the photos page and parse date groups + photo entries."""
         try:
-            r    = self.session.get(self._photos_url, timeout=20)
+            r = self.session.get(self._photos_url, timeout=20)
             r.raise_for_status()
-            soup = BeautifulSoup(r.text, "html.parser")
-
-            gallery = soup.find("div", class_="image_gallery")
-            if not gallery:
-                self.root.after(0, lambda: self.progress_var.set("Geen fotogalerij gevonden."))
-                return
-
-            groups          = []
-            current_date    = "Onbekende datum"
-            current_entries = []
-
-            for node in gallery.children:
-                # BeautifulSoup yields NavigableString nodes (whitespace) alongside Tag
-                # nodes — skip anything without .get() (i.e. non-Tag nodes).
-                if not hasattr(node, "get"):
-                    continue
-
-                classes = node.get("class", [])
-
-                if "col-12" in classes and "font_semi_bold" in classes:
-                    # Date header — flush the previous group and start a new one
-                    if current_entries:
-                        groups.append({"date": current_date, "entries": current_entries})
-                    current_date    = node.get_text(strip=True)
-                    current_entries = []
-
-                elif "image_canvas" in classes:
-                    div  = node.find("div", class_="image_container")
-                    if not div:
-                        continue
-                    full = div.get("data-src", "")
-                    if not full or not full.startswith("http"):
-                        continue
-
-                    img_tag = div.find("img", attrs={"data-original": True})
-                    thumb   = img_tag["data-original"] if img_tag else full
-
-                    # Caption lives in a sibling div whose id is referenced by data-sub-html
-                    caption = ""
-                    sub_id  = div.get("data-sub-html", "").lstrip("#")
-                    if sub_id:
-                        cap_div = node.find("div", {"id": sub_id})
-                        if cap_div:
-                            caption = cap_div.get_text(separator="\n", strip=True)
-
-                    current_entries.append({"thumb": thumb, "full": full, "caption": caption})
-
-            if current_entries:
-                groups.append({"date": current_date, "entries": current_entries})
-
-            # Sort newest first; unparseable dates sink to the bottom.
-            _MIN_DATE = datetime.date.min
-            groups.sort(
-                key=lambda g: _parse_nl_date(g["date"]) or _MIN_DATE,
-                reverse=True,
-            )
+            groups = _parse_gallery_html(r.text)
 
             total        = sum(len(g["entries"]) for g in groups)
             self._groups = groups
@@ -1223,16 +1337,8 @@ class JaamoApp:
         """Worker thread: fetch every story page and hand results to the main thread."""
         try:
             stories_url = f"{BASE_URL}/ouders/children/{self._child_id}/stories"
-            soup = BeautifulSoup(self.session.get(stories_url, timeout=15).text, "html.parser")
-
-            seen, story_ids = set(), []
-            for a in soup.find_all("a", href=True):
-                href = a["href"]
-                if f"/children/{self._child_id}/stories/" in href:
-                    sid = href.rstrip("/").rsplit("/", 1)[-1]
-                    if sid.isdigit() and sid not in seen:
-                        seen.add(sid)
-                        story_ids.append(sid)
+            story_ids = _parse_stories_html(
+                self.session.get(stories_url, timeout=15).text, self._child_id)
 
             total = len(story_ids)
             self._diary_total = total
@@ -1248,43 +1354,12 @@ class JaamoApp:
                 self.root.after(0, lambda n=i + 1, t=total:
                                 self._diary_progress_var.set(f"Laden: {n}/{t}…"))
                 try:
-                    soup2 = BeautifulSoup(
-                        self.session.get(
-                            f"{BASE_URL}/ouders/children/{self._child_id}/stories/{sid}",
-                            timeout=15).text,
-                        "html.parser")
+                    html = self.session.get(
+                        f"{BASE_URL}/ouders/children/{self._child_id}/stories/{sid}",
+                        timeout=15).text
+                    entry = _parse_story_page(html)
 
-                    h1   = soup2.find("h1")
-                    date = h1.get_text(" ", strip=True) if h1 else ""
-
-                    time_div = soup2.find(
-                        "div", class_=lambda c: c and "font_semi_bold" in c and "text_dark_grey" in c)
-                    time_str = time_div.get_text(strip=True) if time_div else ""
-
-                    text_div = soup2.find(
-                        "div", class_=lambda c: c and "font_small" in c and "text_dark_grey" in c)
-                    paras: list[str] = []
-                    if text_div:
-                        seen_p: set[str] = set()
-                        for p in text_div.find_all("p"):
-                            t = p.get_text(strip=True)
-                            if t and t not in seen_p:
-                                seen_p.add(t)
-                                paras.append(t)
-
-                    images: list[dict] = []
-                    for img_div in soup2.find_all("div", class_="image_container"):
-                        full = img_div.get("data-src", "")
-                        if not full or not full.startswith("http"):
-                            continue
-                        img_tag   = img_div.find("img", attrs={"data-original": True})
-                        thumb     = img_tag["data-original"] if img_tag else full
-                        if thumb and thumb.startswith("http"):
-                            images.append({"thumb": thumb, "full": full})
-
-                    if date or paras or images:
-                        entry = {"date": date, "time": time_str,
-                                 "paras": paras, "images": images}
+                    if entry["date"] or entry["paras"] or entry["images"]:
                         _save_story_cache(cache_path, entry)
                         self.root.after(0, lambda e=entry, n=i + 1, t=total:
                                         self._add_diary_card(e, n, t))
@@ -1362,54 +1437,6 @@ class JaamoApp:
             self.root.after(0, _place)
         except Exception:
             pass
-
-    def _build_diary_html(self, entries):
-        """Build a self-contained HTML file from parsed diary entries."""
-        first_name = self._child_name.split()[0]
-        today      = datetime.date.today().strftime("%d-%m-%Y")
-
-        cards = []
-        for e in entries:
-            time_html = (f'<div class="time">{e["time"]}</div>') if e["time"] else ""
-            paras_html = "".join(f"<p>{p}</p>" for p in e["paras"])
-            cards.append(
-                f'<div class="entry">'
-                f'<div class="date">{e["date"]}</div>'
-                f'{time_html}'
-                f'<div class="text">{paras_html}</div>'
-                f'</div>'
-            )
-
-        return f"""<!DOCTYPE html>
-<html lang="nl">
-<head>
-  <meta charset="UTF-8"/>
-  <title>Dagboek van {first_name}</title>
-  <style>
-    *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
-    body {{
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #F0F4F8; color: #1A202C;
-      max-width: 760px; margin: 0 auto; padding: 32px 16px;
-    }}
-    h1   {{ color: #2B6CB0; font-size: 1.8rem; margin-bottom: 4px; }}
-    .sub {{ color: #718096; font-size: .88rem; margin-bottom: 36px; }}
-    .entry {{
-      background: #fff; border: 1px solid #CBD5E0; border-radius: 10px;
-      padding: 18px 22px; margin-bottom: 14px;
-    }}
-    .date {{ font-weight: 700; color: #2B6CB0; font-size: 1rem; margin-bottom: 2px; }}
-    .time {{ color: #718096; font-size: .82rem; margin-bottom: 10px; }}
-    .text p {{ line-height: 1.65; margin-bottom: 8px; }}
-    .text p:last-child {{ margin-bottom: 0; }}
-  </style>
-</head>
-<body>
-  <h1>Dagboek van {first_name}</h1>
-  <p class="sub">Gedownload op {today} &middot; {len(entries)} berichten</p>
-  {"".join(cards)}
-</body>
-</html>"""
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
