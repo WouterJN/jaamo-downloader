@@ -43,6 +43,7 @@ SETTINGS_FILE     = os.path.expanduser("~/.jaamo_settings.json")
 _CACHE_ROOT       = os.path.expanduser("~/.jaamo_cache")
 THUMB_CACHE_DIR   = os.path.join(_CACHE_ROOT, "thumbs")
 DTHUMB_CACHE_DIR  = os.path.join(_CACHE_ROOT, "diary_thumbs")
+PHOTO_CACHE_DIR   = os.path.join(_CACHE_ROOT, "photos")
 STORY_CACHE_DIR   = os.path.join(_CACHE_ROOT, "stories")
 
 # Dutch month abbreviations as they appear on the Jaamo photos page.
@@ -302,7 +303,7 @@ class JaamoApp:
         self.root.configure(bg=BG)
         _apply_styles()
 
-        for _d in (THUMB_CACHE_DIR, DTHUMB_CACHE_DIR, STORY_CACHE_DIR):
+        for _d in (THUMB_CACHE_DIR, DTHUMB_CACHE_DIR, PHOTO_CACHE_DIR, STORY_CACHE_DIR):
             os.makedirs(_d, exist_ok=True)
 
         # Persistent HTTP session keeps the auth cookie across all requests.
@@ -1117,10 +1118,16 @@ class JaamoApp:
         for i, (entry, date_str) in enumerate(pairs):
             url = entry["full"]
             try:
-                r = self.session.get(url, timeout=30)
-                r.raise_for_status()
+                cache = _thumb_cache_path(url, PHOTO_CACHE_DIR)
+                if os.path.exists(cache):
+                    raw = open(cache, "rb").read()
+                else:
+                    r = self.session.get(url, timeout=30)
+                    r.raise_for_status()
+                    raw = r.content
+                    open(cache, "wb").write(raw)
                 dest = _unique_path(folder, _build_filename(url, i, date_str, first_name))
-                data = _apply_metadata(r.content, date_str, entry.get("caption"),
+                data = _apply_metadata(raw, date_str, entry.get("caption"),
                                       self._gps_lat, self._gps_lon)
                 with open(dest, "wb") as f:
                     f.write(data)

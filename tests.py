@@ -36,6 +36,7 @@ from PIL import Image
 
 from app import (
     DTHUMB_CACHE_DIR,
+    PHOTO_CACHE_DIR,
     SCHOOL_LAT,
     SCHOOL_LON,
     STORY_CACHE_DIR,
@@ -1100,6 +1101,12 @@ class TestThumbCachePath(unittest.TestCase):
         self.assertNotEqual(
             _thumb_cache_path(self.URL, THUMB_CACHE_DIR),
             _thumb_cache_path(self.URL, DTHUMB_CACHE_DIR),
+        )
+
+    def test_photo_cache_dir_differs_from_thumb(self):
+        self.assertNotEqual(
+            _thumb_cache_path(self.URL, THUMB_CACHE_DIR),
+            _thumb_cache_path(self.URL, PHOTO_CACHE_DIR),
         )
 
 
