@@ -144,7 +144,17 @@ def _parse_story_page(html):
                 seen_p.add(t)
                 paras.append(t)
 
-    return {"date": date, "time": time_str, "paras": paras}
+    images: list = []
+    for img_div in soup.find_all("div", class_="image_container"):
+        full = img_div.get("data-src", "")
+        if not full or not full.startswith("http"):
+            continue
+        img_tag = img_div.find("img", attrs={"data-original": True})
+        thumb   = img_tag["data-original"] if img_tag else full
+        if thumb and thumb.startswith("http"):
+            images.append({"thumb": thumb, "full": full})
+
+    return {"date": date, "time": time_str, "paras": paras, "images": images}
 
 
 def _build_diary_html(entries, first_name, today="01-01-2026"):
@@ -319,6 +329,29 @@ STORY_PAGE_NO_TEXT_HTML = """
 <html><body>
   <div class="stories">
     <h1 class="py-2 ps-1 m-0"><i class="mdi mdi-book-outline"></i> 15 jan 2026</h1>
+  </div>
+</body></html>
+"""
+
+STORY_PAGE_WITH_IMAGES_HTML = """
+<html><body>
+  <div class="stories">
+    <h1 class="py-2 ps-1 m-0"><i class="mdi mdi-book-outline"></i> 21 mei 2026</h1>
+    <div class="font_semi_bold text_dark_grey pb-2">09:00</div>
+    <div class="font_small text_dark_grey pb-1">
+      <p>Tekst met foto's.</p>
+    </div>
+    <div class="image_container"
+         data-src="https://s3.example.com/full/photo1.jpg">
+      <img data-original="https://s3.example.com/thumb/photo1.jpg" src="/empty.jpg"/>
+    </div>
+    <div class="image_container"
+         data-src="https://s3.example.com/full/photo2.jpg">
+      <img data-original="https://s3.example.com/thumb/photo2.jpg" src="/empty.jpg"/>
+    </div>
+    <div class="image_container" data-src="">
+      <img data-original="https://s3.example.com/thumb/photo3.jpg" src="/empty.jpg"/>
+    </div>
   </div>
 </body></html>
 """
@@ -945,9 +978,32 @@ class TestStoryPageParsing(unittest.TestCase):
         self.assertEqual(entry["date"], "")
 
     def test_result_has_required_keys(self):
-        self.assertIn("date",  self.entry)
-        self.assertIn("time",  self.entry)
-        self.assertIn("paras", self.entry)
+        self.assertIn("date",   self.entry)
+        self.assertIn("time",   self.entry)
+        self.assertIn("paras",  self.entry)
+        self.assertIn("images", self.entry)
+
+    def test_no_images_gives_empty_list(self):
+        self.assertEqual(self.entry["images"], [])
+
+    def test_two_images_extracted(self):
+        entry = _parse_story_page(STORY_PAGE_WITH_IMAGES_HTML)
+        self.assertEqual(len(entry["images"]), 2)
+
+    def test_image_thumb_url(self):
+        entry = _parse_story_page(STORY_PAGE_WITH_IMAGES_HTML)
+        self.assertEqual(entry["images"][0]["thumb"],
+                         "https://s3.example.com/thumb/photo1.jpg")
+
+    def test_image_full_url(self):
+        entry = _parse_story_page(STORY_PAGE_WITH_IMAGES_HTML)
+        self.assertEqual(entry["images"][0]["full"],
+                         "https://s3.example.com/full/photo1.jpg")
+
+    def test_image_missing_data_src_skipped(self):
+        # Third image_container has empty data-src → only 2 images
+        entry = _parse_story_page(STORY_PAGE_WITH_IMAGES_HTML)
+        self.assertEqual(len(entry["images"]), 2)
 
 
 # ── 13. Diary HTML building ───────────────────────────────────────────────────

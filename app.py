@@ -23,7 +23,7 @@ from PIL import Image, ImageTk
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-__version__      = "1.1.0"
+__version__      = "1.2.0"
 
 BASE_URL         = "https://sksg.jaamo.nl"
 LOGIN_URL        = f"{BASE_URL}/login/ouder/sksg"
@@ -34,6 +34,7 @@ SCHOOL_LAT       =  53.2263183712867
 SCHOOL_LON       =   6.581978296365286
 
 THUMB_SIZE       = (180, 180)
+DIARY_THUMB_SIZE = (120, 120)
 COLS             = 4                                      # photos per row in gallery
 CREDENTIALS_FILE = os.path.expanduser("~/.jaamo_credentials.json")
 SETTINGS_FILE    = os.path.expanduser("~/.jaamo_settings.json")
@@ -1129,8 +1130,19 @@ class JaamoApp:
                                 seen_p.add(t)
                                 paras.append(t)
 
-                    if date or paras:
-                        entries.append({"date": date, "time": time_str, "paras": paras})
+                    images: list[dict] = []
+                    for img_div in soup2.find_all("div", class_="image_container"):
+                        full = img_div.get("data-src", "")
+                        if not full or not full.startswith("http"):
+                            continue
+                        img_tag   = img_div.find("img", attrs={"data-original": True})
+                        thumb     = img_tag["data-original"] if img_tag else full
+                        if thumb and thumb.startswith("http"):
+                            images.append({"thumb": thumb, "full": full})
+
+                    if date or paras or images:
+                        entries.append({"date": date, "time": time_str,
+                                        "paras": paras, "images": images})
                 except Exception:
                     pass
 
@@ -1162,6 +1174,25 @@ class JaamoApp:
             # Separator line under header
             tk.Frame(card, height=1, bg=BORDER).pack(fill="x", pady=(0, 8))
 
+            # Image thumbnails
+            if entry.get("images"):
+                img_frame = tk.Frame(card, bg=CARD)
+                img_frame.pack(anchor="w", pady=(0, 8))
+                for img_entry in entry["images"]:
+                    cell = tk.Frame(img_frame,
+                                    width=DIARY_THUMB_SIZE[0],
+                                    height=DIARY_THUMB_SIZE[1],
+                                    bg=BORDER)
+                    cell.pack_propagate(False)
+                    cell.pack(side="left", padx=(0, 6))
+                    lbl = tk.Label(cell, bg=BORDER)
+                    lbl.pack(fill="both", expand=True)
+                    threading.Thread(
+                        target=self._load_diary_thumb,
+                        args=(img_entry["thumb"], lbl),
+                        daemon=True,
+                    ).start()
+
             # Text paragraphs
             for para in entry["paras"]:
                 ttk.Label(card, text=para, wraplength=680,
@@ -1169,6 +1200,21 @@ class JaamoApp:
 
         # Bottom padding so last card isn't flush against the edge
         tk.Frame(self._diary_scroll, height=16, bg=BG).pack()
+
+    def _load_diary_thumb(self, url, label):
+        """Worker thread: fetch one diary thumbnail and place it on the main thread."""
+        try:
+            r = self.session.get(url, timeout=15)
+            r.raise_for_status()
+            pil_img = Image.open(io.BytesIO(r.content))
+            pil_img.thumbnail(DIARY_THUMB_SIZE, Image.LANCZOS)
+            def _place(pil=pil_img):
+                photo = ImageTk.PhotoImage(pil)
+                self._photo_refs.append(photo)
+                label.config(image=photo, bg=CARD)
+            self.root.after(0, _place)
+        except Exception:
+            pass
 
     def _build_diary_html(self, entries):
         """Build a self-contained HTML file from parsed diary entries."""
