@@ -638,6 +638,7 @@ class JaamoApp:
         # ── Toolbar ───────────────────────────────────────────────────────────
         bar = ttk.Frame(self._gallery_frame, style="Card.TFrame", padding=(16, 10))
         bar.pack(fill="x")
+        self._gallery_toolbar = bar
 
         ttk.Button(bar, text="← Terug", style="Ghost.TButton",
                    command=self._back_to_child_selector).pack(side="left", padx=(0, 12))
@@ -662,6 +663,14 @@ class JaamoApp:
         self.selection_var = tk.StringVar(value="")
         ttk.Label(bar, textvariable=self.selection_var, style="Bar.TLabel").pack(side="right", padx=(12, 0))
         ttk.Label(bar, textvariable=self.progress_var,  style="Bar.TLabel").pack(side="right", padx=12)
+
+        # Thin progress bar — fills as thumbnails load, disappears when done
+        self._gallery_pbar_var = tk.DoubleVar(value=0)
+        self._gallery_pbar = ttk.Progressbar(
+            self._gallery_frame, mode="determinate",
+            variable=self._gallery_pbar_var,
+            style="Diary.Horizontal.TProgressbar")
+        self._gallery_pbar.pack(fill="x")
 
         # ── Separator ─────────────────────────────────────────────────────────
         tk.Frame(self._gallery_frame, height=1, bg=BORDER).pack(fill="x")
@@ -861,6 +870,9 @@ class JaamoApp:
         self.sel_all_btn.config(state="disabled")
         self.selection_var.set("")
         self.progress_var.set("Foto's laden…")
+        self._gallery_pbar_var.set(0)
+        if not self._gallery_pbar.winfo_ismapped():
+            self._gallery_pbar.pack(fill="x", after=self._gallery_toolbar)
         threading.Thread(target=self._fetch_photos, daemon=True).start()
 
     def _fetch_photos(self):
@@ -927,6 +939,13 @@ class JaamoApp:
 
             if current_entries:
                 groups.append({"date": current_date, "entries": current_entries})
+
+            # Sort newest first; unparseable dates sink to the bottom.
+            _MIN_DATE = datetime.date.min
+            groups.sort(
+                key=lambda g: _parse_nl_date(g["date"]) or _MIN_DATE,
+                reverse=True,
+            )
 
             total        = sum(len(g["entries"]) for g in groups)
             self._groups = groups
@@ -1031,6 +1050,10 @@ class JaamoApp:
     def _thumb_loaded(self):
         self._loaded_count += 1
         self.progress_var.set(f"{self._loaded_count} / {self._total_count} geladen")
+        if self._total_count:
+            self._gallery_pbar_var.set(self._loaded_count / self._total_count * 100)
+            if self._loaded_count >= self._total_count:
+                self._gallery_pbar.pack_forget()
 
     # ── Selection ─────────────────────────────────────────────────────────────
 
