@@ -234,6 +234,11 @@ def _apply_styles():
     s.configure("Ghost.TButton", foreground=MUTED)
     s.map("Ghost.TButton", foreground=[("active", TEXT)])
 
+    # Diary progress bar — thin strip, fills left-to-right as stories load
+    s.configure("Diary.Horizontal.TProgressbar",
+                background=PRIMARY, troughcolor=BORDER,
+                borderwidth=0, thickness=3)
+
     # Thin modern scrollbar — override the layout to remove arrow buttons entirely
     s.layout("Thin.Vertical.TScrollbar", [
         ("Vertical.TScrollbar.trough", {"children": [
@@ -704,6 +709,7 @@ class JaamoApp:
         self._diary_frame   = ttk.Frame(self.root)
         self._diary_frame.pack(fill="both", expand=True)
         self._diary_entries = []
+        self._diary_total   = 0
 
         # ── Toolbar ───────────────────────────────────────────────────────────
         bar = ttk.Frame(self._diary_frame, style="Card.TFrame", padding=(16, 10))
@@ -720,6 +726,14 @@ class JaamoApp:
         self._diary_progress_var = tk.StringVar(value="Laden…")
         ttk.Label(bar, textvariable=self._diary_progress_var,
                   style="Bar.TLabel").pack(side="right", padx=12)
+
+        # Thin progress bar — fills as stories load, disappears when done
+        self._diary_pbar_var = tk.DoubleVar(value=0)
+        self._diary_pbar = ttk.Progressbar(
+            self._diary_frame, mode="determinate",
+            variable=self._diary_pbar_var,
+            style="Diary.Horizontal.TProgressbar")
+        self._diary_pbar.pack(fill="x")
 
         tk.Frame(self._diary_frame, height=1, bg=BORDER).pack(fill="x")
 
@@ -1099,8 +1113,8 @@ class JaamoApp:
                         seen.add(sid)
                         story_ids.append(sid)
 
-            total   = len(story_ids)
-            entries = []
+            total = len(story_ids)
+            self._diary_total = total
 
             for i, sid in enumerate(story_ids):
                 self.root.after(0, lambda n=i + 1, t=total:
@@ -1141,63 +1155,68 @@ class JaamoApp:
                             images.append({"thumb": thumb, "full": full})
 
                     if date or paras or images:
-                        entries.append({"date": date, "time": time_str,
-                                        "paras": paras, "images": images})
+                        entry = {"date": date, "time": time_str,
+                                 "paras": paras, "images": images}
+                        self.root.after(0, lambda e=entry, n=i + 1, t=total:
+                                        self._add_diary_card(e, n, t))
                 except Exception:
                     pass
 
-            self.root.after(0, lambda: self._on_diary_loaded(entries))
+            self.root.after(0, self._on_diary_loaded)
 
         except Exception as e:
             msg = str(e)
             self.root.after(0, lambda: self._diary_progress_var.set(f"Fout: {msg}"))
 
-    def _on_diary_loaded(self, entries):
-        """Main thread: store entries and populate the scrollable diary view."""
-        self._diary_entries = entries
-        self._diary_progress_var.set(f"{len(entries)} berichten")
+    def _add_diary_card(self, entry, n, total):
+        """Main thread: append one entry and render its card immediately."""
+        self._diary_entries.append(entry)
+        self._diary_pbar_var.set(n / total * 100 if total else 0)
+
+        card = ttk.Frame(self._diary_scroll, style="Card.TFrame", padding=(16, 12))
+        card.pack(fill="x", padx=16, pady=(8, 0))
+
+        # Date + time on one row
+        hdr = ttk.Frame(card, style="Card.TFrame")
+        hdr.pack(fill="x", pady=(0, 6))
+        ttk.Label(hdr, text=entry["date"],
+                  style="BarTitle.TLabel").pack(side="left")
+        if entry["time"]:
+            ttk.Label(hdr, text=entry["time"],
+                      style="Bar.TLabel").pack(side="right")
+
+        # Separator line under header
+        tk.Frame(card, height=1, bg=BORDER).pack(fill="x", pady=(0, 8))
+
+        # Image thumbnails
+        if entry.get("images"):
+            img_frame = tk.Frame(card, bg=CARD)
+            img_frame.pack(anchor="w", pady=(0, 8))
+            for img_entry in entry["images"]:
+                cell = tk.Frame(img_frame,
+                                width=DIARY_THUMB_SIZE[0],
+                                height=DIARY_THUMB_SIZE[1],
+                                bg=BORDER)
+                cell.pack_propagate(False)
+                cell.pack(side="left", padx=(0, 6))
+                lbl = tk.Label(cell, bg=BORDER)
+                lbl.pack(fill="both", expand=True)
+                threading.Thread(
+                    target=self._load_diary_thumb,
+                    args=(img_entry["thumb"], lbl),
+                    daemon=True,
+                ).start()
+
+        # Text paragraphs
+        for para in entry["paras"]:
+            ttk.Label(card, text=para, wraplength=680,
+                      justify="left", style="Card.TLabel").pack(anchor="w", pady=(0, 4))
+
+    def _on_diary_loaded(self):
+        """Main thread: called once all stories are fetched — finalise the UI."""
+        self._diary_progress_var.set(f"{len(self._diary_entries)} berichten")
         self._diary_dl_btn.config(state="normal")
-
-        for entry in entries:
-            card = ttk.Frame(self._diary_scroll, style="Card.TFrame", padding=(16, 12))
-            card.pack(fill="x", padx=16, pady=(8, 0))
-
-            # Date + time on one row
-            hdr = ttk.Frame(card, style="Card.TFrame")
-            hdr.pack(fill="x", pady=(0, 6))
-            ttk.Label(hdr, text=entry["date"],
-                      style="BarTitle.TLabel").pack(side="left")
-            if entry["time"]:
-                ttk.Label(hdr, text=entry["time"],
-                          style="Bar.TLabel").pack(side="right")
-
-            # Separator line under header
-            tk.Frame(card, height=1, bg=BORDER).pack(fill="x", pady=(0, 8))
-
-            # Image thumbnails
-            if entry.get("images"):
-                img_frame = tk.Frame(card, bg=CARD)
-                img_frame.pack(anchor="w", pady=(0, 8))
-                for img_entry in entry["images"]:
-                    cell = tk.Frame(img_frame,
-                                    width=DIARY_THUMB_SIZE[0],
-                                    height=DIARY_THUMB_SIZE[1],
-                                    bg=BORDER)
-                    cell.pack_propagate(False)
-                    cell.pack(side="left", padx=(0, 6))
-                    lbl = tk.Label(cell, bg=BORDER)
-                    lbl.pack(fill="both", expand=True)
-                    threading.Thread(
-                        target=self._load_diary_thumb,
-                        args=(img_entry["thumb"], lbl),
-                        daemon=True,
-                    ).start()
-
-            # Text paragraphs
-            for para in entry["paras"]:
-                ttk.Label(card, text=para, wraplength=680,
-                          justify="left", style="Card.TLabel").pack(anchor="w", pady=(0, 4))
-
+        self._diary_pbar.pack_forget()
         # Bottom padding so last card isn't flush against the edge
         tk.Frame(self._diary_scroll, height=16, bg=BG).pack()
 
