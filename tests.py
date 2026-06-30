@@ -37,6 +37,7 @@ from PIL import Image
 from app import (
     SCHOOL_LAT,
     SCHOOL_LON,
+    JaamoApp,
     _apply_metadata,
     _build_filename,
     _decimal_to_dms,
@@ -1053,6 +1054,31 @@ class TestBuildDiaryHtml(unittest.TestCase):
     def test_empty_entries_gives_zero_count(self):
         html = _build_diary_html([], "Emma")
         self.assertIn("0 berichten", html)
+
+
+# ── 14. GUI callback integrity ────────────────────────────────────────────────
+
+class TestGuiCallbackRefs(unittest.TestCase):
+    """Catch dead command= references without starting a Tk window.
+
+    Parses every ``command=self._xxx`` pattern from app.py and asserts the
+    named method exists on JaamoApp.  Catches the class of bug where a method
+    is removed but its reference in a widget's command= argument is forgotten.
+    """
+
+    def test_all_command_callbacks_exist(self):
+        src_path = os.path.join(os.path.dirname(__file__), "app.py")
+        with open(src_path) as f:
+            source = f.read()
+
+        # Match the full chain (e.g. canvas.yview), then keep only direct refs
+        all_refs = re.findall(r"command\s*=\s*self\.([\w.]+)", source)
+        refs = [r for r in all_refs if "." not in r]
+        missing = [name for name in set(refs) if not hasattr(JaamoApp, name)]
+        self.assertEqual(
+            missing, [],
+            f"JaamoApp methods used as command= callbacks but not defined: {missing}",
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
